@@ -32,10 +32,8 @@
 *.a
 *.lib
 
-# Executables
-*.exe
-*.out
-*.app
-
 # debug information files
 *.dwo
+
+# vscode
+.vscode/
