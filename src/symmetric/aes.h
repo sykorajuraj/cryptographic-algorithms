@@ -15,6 +15,8 @@ extern "C" {
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
+
 #include <errno.h>
 
 /** Key length represents 128 bits */
@@ -45,26 +47,15 @@ extern "C" {
 // STRUCTURES
 
 /**
- * @struct sym_aes_enc_ctx
- * @brief Context for AES encryption
+ * @struct sym_aes_ctx
+ * @brief Context for AES operations
  */
-typedef struct sym_aes_enc_ctx 
+typedef struct sym_aes_ctx 
 {
    uint8_t round_keys[176];    /**< 11 round keys * 16 bytes = 176 bytes */
    uint8_t state[16];          /**< Current state (4x4 matrix in column-major order) */
    uint8_t iv[16];             /**< Initialization vector for CBC mode */
-} sym_aes_enc_ctx_t;
-
-/**
- * @struct sym_aes_dnc_ctx
- * @brief Context for AES decryption
- */
-typedef struct sym_aes_dnc_ctx 
-{
-   uint8_t round_keys[176];    /**< 11 round keys * 16 bytes = 176 bytes */
-   uint8_t state[16];          /**< Current state (4x4 matrix in column-major order) */
-   uint8_t iv[16];             /**< Initialization vector for CBC mode */
-} sym_aes_dnc_ctx_t;
+} sym_aes_ctx_t;
 
 /**
  * @struct sym_aes_key
@@ -98,41 +89,31 @@ typedef enum {
 // CONTEXT MANAGEMENT FUNCTIONS
 
 /**
- * @brief Creation of AES encryption context
+ * @brief Creation of AES context
  * 
- * @param key Pointer to 128-bit (16 bytes) encryption key
+ * @param key Pointer to 128-bit (16 bytes) key
  * @param key_len Length of the key in bytes (must be 16)
- * @return Pointer to context for AES encryption, NULL on failure
+ * @return Pointer to context for AES, NULL on failure
  */
-sym_aes_enc_ctx_t *
-sym_aes_enc_ctx_init(const uint8_t *key, size_t key_len);
+sym_aes_ctx_t *
+sym_aes_ctx_init(const uint8_t *key, size_t key_len);
 
 /**
- * @brief Destruction of AES encryption context
+ * @brief Destruction of AES context
  * 
- * @param ctx Pointer to encryption context to destroy
- * @return Pointer to context for AES encryption
+ * @param ctx Pointer to context to destroy
  */
-sym_aes_enc_ctx_t *
-sym_aes_enc_ctx_destroy(sym_aes_enc_ctx_t *ctx);
+void
+sym_aes_ctx_destroy(sym_aes_ctx_t *ctx);
 
 /**
- * @brief Creation of AES decryption context
+ * @brief Clear of AES context
  * 
- * @param key Pointer to 128-bit (16 bytes) decryption key
- * @param key_len Length of the key in bytes (must be 16)
- * @return Context for AES decryption, NULL on failure
+ * @param ctx Pointer to context to destroy
+ * @return Pointer to context for AES
  */
-sym_aes_dnc_ctx_t *
-sym_aes_dnc_ctx_init(const uint8_t *key, size_t key_len);
-
-/**
- * @brief Destruction of AES decryption context
- * @param ctx Decryption context to destroy
- * @return Pointer to context for AES decryption
- */
-sym_aes_dnc_ctx_t *
-sym_aes_dnc_ctx_destroy(sym_aes_dnc_ctx_t *ctx);
+sym_aes_ctx_t *
+sym_aes_ctx_clear(sym_aes_ctx_t *ctx);
 
 /**
  * @brief Set initialization vector for CBC/CTR modes
@@ -142,7 +123,7 @@ sym_aes_dnc_ctx_destroy(sym_aes_dnc_ctx_t *ctx);
  * @return AES_SUCCESS on success, negative value on failure
  */
 int
-sym_aes_enc_set_iv(sym_aes_enc_ctx_t *ctx, const uint8_t *iv);
+sym_aes_enc_set_iv(sym_aes_ctx_t *ctx, const uint8_t *iv);
 
 /**
  * @brief Set initialization vector for CBC/CTR modes (decryption)
@@ -152,7 +133,7 @@ sym_aes_enc_set_iv(sym_aes_enc_ctx_t *ctx, const uint8_t *iv);
  * @return AES_SUCCESS on success, negative value on failure
  */
 int
-sym_aes_dnc_set_iv(sym_aes_dnc_ctx_t *ctx, const uint8_t *iv);
+sym_aes_dnc_set_iv(sym_aes_ctx_t *ctx, const uint8_t *iv);
 
 // CORE ENCRYPTION FUNCTIONS
 
@@ -166,7 +147,7 @@ sym_aes_dnc_set_iv(sym_aes_dnc_ctx_t *ctx, const uint8_t *iv);
  */
 int
 sym_aes_encryption(
-   sym_aes_enc_ctx_t *ctx,
+   sym_aes_ctx_t *ctx,
    const uint8_t *plaintext,
    uint8_t *ciphertext);
 
@@ -180,7 +161,7 @@ sym_aes_encryption(
  */
 int
 sym_aes_decryption(
-   sym_aes_dnc_ctx_t *ctx,
+   sym_aes_ctx_t *ctx,
    const uint8_t *ciphertext,
    uint8_t *plaintext);
 
@@ -198,7 +179,7 @@ sym_aes_decryption(
  */
 int
 sym_aes_encrypt_cbc(
-   sym_aes_enc_ctx_t *ctx,
+   sym_aes_ctx_t *ctx,
    const uint8_t *plaintext,
    size_t plaintext_len,
    uint8_t *ciphertext,
@@ -216,7 +197,7 @@ sym_aes_encrypt_cbc(
  */
 int
 sym_aes_decrypt_cbc(
-   sym_aes_dnc_ctx_t *ctx,
+   sym_aes_ctx_t *ctx,
    const uint8_t *ciphertext,
    size_t ciphertext_len,
    uint8_t *plaintext,
@@ -234,7 +215,7 @@ sym_aes_decrypt_cbc(
  */
 int
 sym_aes_encrypt_ctr(
-   sym_aes_enc_ctx_t *ctx,
+   sym_aes_ctx_t *ctx,
    const uint8_t *plaintext,
    size_t plaintext_len,
    uint8_t *ciphertext,
@@ -252,7 +233,7 @@ sym_aes_encrypt_ctr(
  */
 int
 sym_aes_decrypt_ctr(
-   sym_aes_dnc_ctx_t *ctx,
+   sym_aes_ctx_t *ctx,
    const uint8_t *ciphertext,
    size_t ciphertext_len,
    uint8_t *plaintext,
@@ -302,7 +283,7 @@ sym_aes_pkcs7_unpad(
  * @return Pointer to AES 128 bits key
  */
 sym_aes_key_t *
-sym_aes_create_key(const char *key_data, size_t key_len);
+sym_aes_create_key(const uint8_t *key_data, size_t key_len);
 
 /**
  * @brief Destroy AES key structure and securely erase key data
