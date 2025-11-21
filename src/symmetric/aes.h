@@ -43,18 +43,27 @@ extern "C" {
 #define AES_ERROR_MEMORY -ENOMEM
 #define AES_ERROR_INVALID_KEY_LENGTH -2
 #define AES_ERROR_INVALID_DATA_LENGTH -3
+#define AES_ERROR_IV_NOT_SET -4
 
 // STRUCTURES
 
 /**
  * @struct sym_aes_ctx
  * @brief Context for AES operations
+ * 
+ * State array is stored in column-major order as per AES specification:
+ * Logical layout:    Memory layout:
+ *  s0  s4  s8 s12    [s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15]
+ *  s1  s5  s9 s13
+ *  s2  s6 s10 s14
+ *  s3  s7 s11 s15
  */
 typedef struct sym_aes_ctx 
 {
    uint8_t round_keys[176];    /**< 11 round keys * 16 bytes = 176 bytes */
    uint8_t state[16];          /**< Current state (4x4 matrix in column-major order) */
    uint8_t iv[16];             /**< Initialization vector for CBC mode */
+   uint8_t iv_initialized;     /**< Flag: 1 if IV has been set, 0 otherwise */
 } sym_aes_ctx_t;
 
 /**
@@ -169,6 +178,9 @@ sym_aes_decryption(
 
 /**
  * @brief Encrypt data in CBC mode with PKCS#7 padding
+ * 
+ * Required size for cipher buffer: plaintext_len + AES_BLOCK_SIZE 
+ * (to account for worst-case padding)
  * 
  * @param ctx Pointer to encryption context
  * @param plaintext Pointer to plaintext data
