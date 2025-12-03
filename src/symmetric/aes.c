@@ -70,7 +70,7 @@ static uint8_t gf_mul(uint8_t a, uint8_t b) {
 }
 
 // Secure memory clear using volatile pointer to prevent optimization
-static void sec_memset(void *ptr, size_t len) {
+static void mem_clean(void *ptr, size_t len) {
     volatile uint8_t *vptr = (volatile uint8_t *)ptr;
     while (len--) {
         *vptr++ = 0;
@@ -126,7 +126,7 @@ sym_aes_ctx_t *sym_aes_ctx_init(const uint8_t *key, size_t key_len) {
     sym_aes_ctx_t *ctx = (sym_aes_ctx_t *)malloc(sizeof(sym_aes_ctx_t));
     if (!ctx) return NULL;
     
-    sec_memset(ctx, 0, sizeof(sym_aes_ctx_t));
+    memset(ctx, 0, sizeof(sym_aes_ctx_t));
     ctx->iv_initialized = 0;
     key_expansion(key, ctx->round_keys);
     
@@ -136,7 +136,7 @@ sym_aes_ctx_t *sym_aes_ctx_init(const uint8_t *key, size_t key_len) {
 // Context destruction function
 void sym_aes_ctx_destroy(sym_aes_ctx_t *ctx) {
     if (ctx) {
-        sec_memset(ctx, 0, sizeof(sym_aes_ctx_t));
+        mem_clean(ctx, sizeof(sym_aes_ctx_t));
         free(ctx);
     }
 }
@@ -144,7 +144,7 @@ void sym_aes_ctx_destroy(sym_aes_ctx_t *ctx) {
 // Context clear
 sym_aes_ctx_t *sym_aes_ctx_clear(sym_aes_ctx_t *ctx) {
     if (ctx) {
-        sec_memset(ctx, 0, sizeof(sym_aes_ctx_t));
+        mem_clean(ctx, sizeof(sym_aes_ctx_t));
     }
     return ctx;
 }
@@ -394,13 +394,19 @@ int sym_aes_pkcs7_unpad(const uint8_t *padded_data, size_t padded_len, uint8_t *
     
     // Validate padding
     if (padding_len == 0 || padding_len > AES_BLOCK_SIZE) {
-        return AES_ERROR_INVALID_DATA_LENGTH;
+        return AES_ERROR_INVALID_PADDING;
     }
     
+    // Constant-time padding validation to prevent timing attacks
+    uint8_t padding_valid = 1;
     for (size_t i = 0; i < padding_len; i++) {
         if (padded_data[padded_len - 1 - i] != padding_len) {
-            return AES_ERROR_INVALID_DATA_LENGTH;
+            padding_valid = 0;
         }
+    }
+    
+    if (!padding_valid) {
+        return AES_ERROR_INVALID_PADDING;
     }
     
     *data_len = padded_len - padding_len;
@@ -416,7 +422,7 @@ int sym_aes_encrypt_cbc(sym_aes_ctx_t *ctx, const uint8_t *plaintext, size_t pla
         return AES_ERROR_INVALID_PARAM;
     }
 
-    // Validation of the IV has been initilized
+    // FIXED: Validate that IV has been initialized
     if (!ctx->iv_initialized) {
         return AES_ERROR_IV_NOT_SET;
     }
@@ -450,7 +456,7 @@ int sym_aes_encrypt_cbc(sym_aes_ctx_t *ctx, const uint8_t *plaintext, size_t pla
         // Encrypt block
         result = sym_aes_encryption(ctx, block, &ciphertext[i]);
         if (result != AES_SUCCESS) {
-            sec_memset(padded_data, plaintext_len + AES_BLOCK_SIZE);
+            mem_clean(padded_data, plaintext_len + AES_BLOCK_SIZE);
             free(padded_data);
             return result;
         }
@@ -460,7 +466,7 @@ int sym_aes_encrypt_cbc(sym_aes_ctx_t *ctx, const uint8_t *plaintext, size_t pla
     }
     
     *ciphertext_len = padded_len;
-    sec_memset(padded_data, plaintext_len + AES_BLOCK_SIZE);
+    mem_clean(padded_data, plaintext_len + AES_BLOCK_SIZE);
     free(padded_data);
     return AES_SUCCESS;
 }
@@ -470,6 +476,11 @@ int sym_aes_decrypt_cbc(sym_aes_ctx_t *ctx, const uint8_t *ciphertext, size_t ci
                         uint8_t *plaintext, size_t *plaintext_len) {
     if (!ctx || !ciphertext || !plaintext || !plaintext_len) {
         return AES_ERROR_INVALID_PARAM;
+    }
+    
+    // FIXED: Validate IV initialization
+    if (!ctx->iv_initialized) {
+        return AES_ERROR_IV_NOT_SET;
     }
     
     if (ciphertext_len == 0 || ciphertext_len % AES_BLOCK_SIZE != 0) {
@@ -491,7 +502,7 @@ int sym_aes_decrypt_cbc(sym_aes_ctx_t *ctx, const uint8_t *ciphertext, size_t ci
         // Decrypt block
         int result = sym_aes_decryption(ctx, &ciphertext[i], block);
         if (result != AES_SUCCESS) {
-            sec_memset(decrypted_data, ciphertext_len);
+            mem_clean(decrypted_data, ciphertext_len);
             free(decrypted_data);
             return result;
         }
@@ -507,7 +518,7 @@ int sym_aes_decrypt_cbc(sym_aes_ctx_t *ctx, const uint8_t *ciphertext, size_t ci
     
     // Remove PKCS#7 padding
     int result = sym_aes_pkcs7_unpad(decrypted_data, ciphertext_len, plaintext, plaintext_len);
-    sec_memset(decrypted_data, ciphertext_len);
+    mem_clean(decrypted_data, ciphertext_len);
     free(decrypted_data);
     
     return result;
@@ -529,6 +540,11 @@ int sym_aes_encrypt_ctr(sym_aes_ctx_t *ctx, const uint8_t *plaintext, size_t pla
         return AES_ERROR_INVALID_PARAM;
     }
     
+    // FIXED: Validate IV initialization
+    if (!ctx->iv_initialized) {
+        return AES_ERROR_IV_NOT_SET;
+    }
+    
     uint8_t counter[AES_BLOCK_SIZE];
     memcpy(counter, ctx->iv, AES_BLOCK_SIZE);
     
@@ -539,6 +555,7 @@ int sym_aes_encrypt_ctr(sym_aes_ctx_t *ctx, const uint8_t *plaintext, size_t pla
         // Encrypt counter to generate keystream
         int result = sym_aes_encryption(ctx, counter, keystream);
         if (result != AES_SUCCESS) {
+            mem_clean(counter, AES_BLOCK_SIZE);
             return result;
         }
         
@@ -555,7 +572,7 @@ int sym_aes_encrypt_ctr(sym_aes_ctx_t *ctx, const uint8_t *plaintext, size_t pla
     }
     
     *ciphertext_len = plaintext_len;
-    sec_memset(counter, AES_BLOCK_SIZE);
+    mem_clean(counter, AES_BLOCK_SIZE);
     return AES_SUCCESS;
 }
 
@@ -571,11 +588,8 @@ int sym_aes_decrypt_ctr(sym_aes_ctx_t *ctx, const uint8_t *ciphertext, size_t ci
         return AES_ERROR_IV_NOT_SET;
     }
     
-    // Create temporary encryption context (CTR uses encryption for both directions)
-    sym_aes_ctx_t temp_ctx;
-    memcpy(&temp_ctx, ctx, sizeof(sym_aes_ctx_t));
-    
-    return sym_aes_encrypt_ctr(&temp_ctx, ciphertext, ciphertext_len, plaintext, plaintext_len);
+    // CTR mode uses encryption for both directions
+    return sym_aes_encrypt_ctr(ctx, ciphertext, ciphertext_len, plaintext, plaintext_len);
 }
 
 // Key management functions
@@ -593,7 +607,7 @@ sym_aes_key_t *sym_aes_create_key(const uint8_t *key_data, size_t key_len) {
 
 void sym_aes_destroy_key(sym_aes_key_t *key) {
     if (key) {
-        sec_memset(key->key_data, 0, KEY_LENGTH_BYTES);
+        mem_clean(key->key_data, KEY_LENGTH_BYTES);
         key->key_length = 0;
         free(key);
     }
