@@ -8,64 +8,47 @@ crypto-perfect-hash/
 ├── LICENSE
 │
 ├── docs/
-│   ├── study.pdf
-│   └── slides.pdf                   # Presentation
+│   ├── study.pdf              # Project documentation
+│   └── slides.pdf             # Presentation slides
 │
 ├── src/
 │   ├── symmetric/
-│   │   ├── aes.h
-│   │   ├── aes.c                    # Basic AES-128
-│   │   └── aes_sbox_traditional.c   # Traditional 256-byte S-box
+│   │   ├── aes.h             # AES-128 header
+│   │   └── aes.c             # AES-128 implementation
 │   │
 │   ├── asymmetric/
-│   │   ├── rsa.h
-│   │   └── rsa.c                    # Basic RSA (keygen, encrypt, decrypt)
+│   │   ├── rsa.h             # RSA header (planned)
+│   │   └── rsa.c             # RSA implementation (planned)
 │   │
 │   └── hash/
-│       ├── sha256.h
-│       ├── sha256.c                 # SHA-256 implementation
-│       │
-│       ├── chd.h                    # Perfect Hash: CHD
+│       ├── sha256.h          # SHA-256 (planned)
+│       ├── sha256.c
+│       ├── chd.h             # CHD perfect hash (planned)
 │       ├── chd.c
-│       │
-│       ├── bdz.h                    # Perfect Hash: BDZ (2-partite only)
-│       ├── bdz.c
-│       │
-│       ├── rank.h                   # Succinct: Rank
-│       ├── rank.c
-│       │
-│       ├── aes_sbox_phf.h          # Integration: AES S-box with PHF
-│       └── aes_sbox_phf.c
+│       ├── bdz.h             # BDZ perfect hash (planned)
+│       └── bdz.c
 │
 ├── tests/
-│   ├── test_aes.c
-│   ├── test_rsa.c
-│   ├── test_sha256.c
-│   ├── test_chd.c
-│   ├── test_bdz.c
-│   ├── test_rank.c
-│   └── test_sbox_phf.c             # Compare traditional vs PHF S-box
+│   ├── test_aes.cpp          # AES unit tests
+│   ├── test_rsa.cpp          # RSA tests (planned)
+│   ├── test_sha256.cpp       # SHA-256 tests (planned)
+│   └── test_chd.cpp          # Perfect hash tests (planned)
 │
 ├── benchmarks/
-│   ├── bench_aes.c                 # AES performance
-│   ├── bench_rsa.c                 # RSA performance
-│   ├── bench_chd.c                 # CHD construction + query
-│   ├── bench_bdz.c                 # BDZ construction + query
-│   └── bench_sbox_compare.c        # Traditional vs PHF S-box
+│   ├── bench_aes.c           # AES performance benchmarks
+│   ├── bench_rsa.c           # RSA benchmarks (planned)
+│   └── bench_sbox_compare.c  # S-box comparison (planned)
 │
 ├── examples/
-│   ├── example_aes.c
-│   ├── example_rsa.c
-│   ├── example_chd.c               # From slides: 4 IP addresses
-│   └── example_bdz.c
+│   ├── example_aes.c         # AES usage examples
+│   ├── example_rsa.c         # RSA examples (planned)
+│   └── example_chd.c         # Perfect hash examples (planned)
 │
 ├── scripts/
-│   ├── run_tests.sh
-│   ├── run_benchmarks.sh
-│   └── plot_results.py             # Generate graphs
+│   ├── run_tests.sh          # Test runner script
+│   ├── run_benchmarks.sh     # Benchmark runner
+│   └── plot_results.py       # Results visualization
 │
 └── results/
-    ├── benchmarks.csv              # Raw data
-    ├── construction_time.png       # CHD vs BDZ construction
-    ├── space_efficiency.png        # Bits/key comparison
-    └── sbox_comparison.png         # Traditional vs PHF S-box
+    ├── benchmarks.csv        # Raw benchmark data
+    └── *.png                 # Generated graphs

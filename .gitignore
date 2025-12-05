@@ -35,5 +35,70 @@
 # debug information files
 *.dwo
 
-# vscode
+# VSCode
 .vscode/
+
+# Build artifacts
+build/
+bin/
+*.o
+*.a
+*.so
+*.dylib
+
+# Test results
+results/*.csv
+results/*.log
+results/*.png
+results/*.txt
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Compiled binaries
+test_*
+bench_*
+example_*
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Core dumps
+core
+core.*
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.pyc
+
+# Documentation build
+docs/build/
+*.aux
+*.log
+*.out
+*.toc
+
+# Backup files
+*.backup
+*~
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
