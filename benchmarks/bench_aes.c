@@ -9,7 +9,8 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
-#include "symmetric/aes.h"
+
+#include "src/symmetric/aes.h"
 
 #define COLOR_CYAN "\033[0;36m"
 #define COLOR_GREEN "\033[0;32m"
@@ -19,87 +20,6 @@
 // Benchmark parameters
 #define ITERATIONS 10000
 #define WARMUP_ITERATIONS 1000
-
-// Box printing width
-#define BOX_WIDTH 50
-
-// Get time in microseconds
-static double get_time_us() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (double)tv.tv_sec * 1000000.0 + (double)tv.tv_usec;
-}
-
-/**
- * Print a horizontal line for box borders
- * @param width Width of the box (internal width, excluding border characters)
- * @param top_border If true, prints top border; if false, prints bottom border
- */
-static void print_box_line(int width, int top_border) {
-    if (top_border) {
-        printf("╔");
-        for (int i = 0; i < width; i++) printf("═");
-        printf("╗\n");
-    } else {
-        printf("╚");
-        for (int i = 0; i < width; i++) printf("═");
-        printf("╝\n");
-    }
-}
-
-/**
- * Print a text line centered within a box
- * @param text Text to print
- * @param width Width of the box (internal width)
- */
-static void print_box_text(const char *text, int width) {
-    int text_len = strlen(text);
-    int padding = (width - text_len) / 2;
-    int right_padding = width - text_len - padding;
-    
-    printf("║");
-    for (int i = 0; i < padding; i++) printf(" ");
-    printf("%s", text);
-    for (int i = 0; i < right_padding; i++) printf(" ");
-    printf("║\n");
-}
-
-/**
- * Print a complete box with title
- * @param title Title text to display in the box
- * @param width Width of the box (internal width)
- * @param color Color code (use COLOR_* defines, or NULL for no color)
- */
-static void print_box(const char *title, int width, const char *color) {
-    if (color) printf("%s", color);
-    
-    printf("\n");
-    print_box_line(width, 1);  // Top border
-    print_box_text("", width);  // Empty line
-    print_box_text(title, width);  // Title
-    print_box_text("", width);  // Empty line
-    print_box_line(width, 0);  // Bottom border
-    
-    if (color) printf(COLOR_RESET);
-}
-
-/**
- * Print a simple section header box
- * @param title Title text
- * @param width Width of the box
- */
-static void print_section_box(const char *title, int width) {
-    print_box(title, width, COLOR_CYAN);
-}
-
-/**
- * Print a completion/success message box
- * @param message Message text
- * @param width Width of the box
- */
-static void print_success_box(const char *message, int width) {
-    print_box(message, width, COLOR_GREEN);
-}
 
 // Format throughput
 void print_throughput(const char *label, size_t bytes, double time_us) {

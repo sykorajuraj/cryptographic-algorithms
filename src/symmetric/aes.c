@@ -4,7 +4,7 @@
  * @author Juraj Sýkora <juraj.sykora@studio.unibo.it>
  */
 
-#include "aes.h"
+#include "src/symmetric/aes.h"
 
 // AES S-box (Substitution box) for SubBytes transformation
 static const uint8_t sbox[256] = {

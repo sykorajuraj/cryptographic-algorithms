@@ -19,6 +19,8 @@ extern "C" {
 
 #include <errno.h>
 
+#include "utils/utils.h"
+
 /** Key length represents 128 bits */
 #define KEY_LENGTH 128
 
