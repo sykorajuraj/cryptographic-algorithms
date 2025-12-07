@@ -12,84 +12,34 @@
 
 #include "src/symmetric/aes.h"
 
-#define COLOR_CYAN "\033[0;36m"
-#define COLOR_GREEN "\033[0;32m"
-#define COLOR_YELLOW "\033[0;33m"
-#define COLOR_RESET "\033[0m"
+// CSV output structure
+typedef struct {
+    char algorithm[16];
+    char mode[8];
+    size_t data_size;
+    char operation[16];
+    double throughput_mbps;
+    double time_us;
+} benchmark_result_t;
 
-// Benchmark parameters
-#define ITERATIONS 10000
-#define WARMUP_ITERATIONS 1000
+static benchmark_result_t results[100];
+static int result_count = 0;
 
-// Format throughput
-void print_throughput(const char *label, size_t bytes, double time_us) {
-    double mb_per_sec = (bytes / (1024.0 * 1024.0)) / (time_us / 1000000.0);
-    double cycles_per_byte = time_us / bytes;
-    
-    printf("  %-30s: %8.2f MB/s  (%8.2f µs/byte)\n", 
-           label, mb_per_sec, cycles_per_byte);
-}
-
-void benchmark_single_block() {
-    print_section_box("Benchmark 1: Single Block Operations", BOX_WIDTH);
-    
-    uint8_t key[16] = {
-        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
-        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
-    };
-    
-    uint8_t plaintext[16] = {
-        0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d,
-        0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34
-    };
-    
-    uint8_t ciphertext[16];
-    uint8_t decrypted[16];
-    
-    sym_aes_ctx_t *ctx = sym_aes_ctx_init(key, KEY_LENGTH_BYTES);
-    if (!ctx) {
-        printf("Failed to initialize context!\n");
-        return;
+void add_result(const char *algo, const char *mode, size_t size, 
+                const char *op, double throughput, double time) {
+    if (result_count < 100) {
+        strncpy(results[result_count].algorithm, algo, 15);
+        strncpy(results[result_count].mode, mode, 7);
+        strncpy(results[result_count].operation, op, 15);
+        results[result_count].data_size = size;
+        results[result_count].throughput_mbps = throughput;
+        results[result_count].time_us = time;
+        result_count++;
     }
-    
-    printf("\nIterations: %d\n", ITERATIONS);
-    printf("Block size: 16 bytes\n\n");
-    
-    // Warmup
-    for (int i = 0; i < WARMUP_ITERATIONS; i++) {
-        sym_aes_encryption(ctx, plaintext, ciphertext);
-    }
-    
-    // Benchmark encryption
-    double start = get_time_us();
-    for (int i = 0; i < ITERATIONS; i++) {
-        sym_aes_encryption(ctx, plaintext, ciphertext);
-    }
-    double end = get_time_us();
-    double enc_time = end - start;
-    
-    print_throughput("Single Block Encryption", 16 * ITERATIONS, enc_time);
-    printf("  Total time: %.2f ms (%.2f µs/op)\n", 
-           enc_time / 1000.0, enc_time / ITERATIONS);
-    
-    // Benchmark decryption
-    start = get_time_us();
-    for (int i = 0; i < ITERATIONS; i++) {
-        sym_aes_decryption(ctx, ciphertext, decrypted);
-    }
-    end = get_time_us();
-    double dec_time = end - start;
-    
-    printf("\n");
-    print_throughput("Single Block Decryption", 16 * ITERATIONS, dec_time);
-    printf("  Total time: %.2f ms (%.2f µs/op)\n", 
-           dec_time / 1000.0, dec_time / ITERATIONS);
-    
-    sym_aes_ctx_destroy(ctx);
 }
 
 void benchmark_cbc_mode() {
-    print_section_box("Benchmark 2: CBC Mode (Various Sizes)", BOX_WIDTH);
+    print_section_box("Benchmark: CBC Mode ", BOX_WIDTH);
     
     uint8_t key[16] = {
         0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
@@ -103,8 +53,9 @@ void benchmark_cbc_mode() {
     
     size_t sizes[] = {64, 256, 1024, 4096, 16384};
     int num_sizes = sizeof(sizes) / sizeof(sizes[0]);
+    int iterations = 10000;
     
-    printf("\nIterations per size: %d\n\n", ITERATIONS);
+    printf("\nIterations per size: %d\n\n", iterations);
     
     for (int s = 0; s < num_sizes; s++) {
         size_t data_size = sizes[s];
@@ -112,45 +63,112 @@ void benchmark_cbc_mode() {
         uint8_t *plaintext = malloc(data_size);
         uint8_t *ciphertext = malloc(data_size + AES_BLOCK_SIZE);
         uint8_t *decrypted = malloc(data_size + AES_BLOCK_SIZE);
+        
+        if (!plaintext || !ciphertext || !decrypted) {
+            printf("Memory allocation failed!\n");
+            free(plaintext);
+            free(ciphertext);
+            free(decrypted);
+            continue;
+        }
+        
         size_t ciphertext_len, decrypted_len;
         
         // Fill with random data
-        for (size_t i = 0; i < data_size; i++) {
-            plaintext[i] = (uint8_t)(rand() % 256);
-        }
+        generate_random_bytes(plaintext, data_size);
         
         sym_aes_ctx_t *ctx_enc = sym_aes_ctx_init(key, KEY_LENGTH_BYTES);
         sym_aes_ctx_t *ctx_dec = sym_aes_ctx_init(key, KEY_LENGTH_BYTES);
         
+        if (!ctx_enc || !ctx_dec) {
+            printf("Context initialization failed!\n");
+            free(plaintext);
+            free(ciphertext);
+            free(decrypted);
+            sym_aes_ctx_destroy(ctx_enc);
+            sym_aes_ctx_destroy(ctx_dec);
+            continue;
+        }
+        
+        // Set IV ONCE before benchmark loop
+        if (sym_aes_enc_set_iv(ctx_enc, iv) != AES_SUCCESS) {
+            printf("IV set failed!\n");
+            goto cleanup;
+        }
+        
         // Warmup
-        sym_aes_enc_set_iv(ctx_enc, iv);
-        sym_aes_encrypt_cbc(ctx_enc, plaintext, data_size, ciphertext, &ciphertext_len);
+        for (int i = 0; i < 100; i++) {
+            sym_aes_enc_set_iv(ctx_enc, iv);
+            sym_aes_encrypt_cbc(ctx_enc, plaintext, data_size, 
+                              ciphertext, &ciphertext_len);
+        }
         
         // Benchmark encryption
         double start = get_time_us();
-        for (int i = 0; i < ITERATIONS; i++) {
+        for (int i = 0; i < iterations; i++) {
+            // Reset IV for each iteration (necessary for CBC)
             sym_aes_enc_set_iv(ctx_enc, iv);
-            sym_aes_encrypt_cbc(ctx_enc, plaintext, data_size, ciphertext, &ciphertext_len);
+            
+            int result = sym_aes_encrypt_cbc(ctx_enc, plaintext, data_size, 
+                                           ciphertext, &ciphertext_len);
+            if (result != AES_SUCCESS) {
+                printf("Encryption failed at iteration %d\n", i);
+                goto cleanup;
+            }
         }
         double end = get_time_us();
         double enc_time = end - start;
+        
+        double mb_per_sec = (data_size * iterations / (1024.0 * 1024.0)) / 
+                           (enc_time / 1000000.0);
+        double time_per_op = enc_time / iterations;
         
         char label[64];
         snprintf(label, sizeof(label), "CBC Encrypt (%zu bytes)", data_size);
-        print_throughput(label, data_size * ITERATIONS, enc_time);
+        printf("  %-35s: %8.2f MB/s  (%8.2f µs/op)\n", 
+               label, mb_per_sec, time_per_op);
+        
+        // Store result for CSV
+        add_result("AES-128", "CBC", data_size, "Encrypt", 
+                  mb_per_sec, time_per_op);
         
         // Benchmark decryption
+        if (sym_aes_dnc_set_iv(ctx_dec, iv) != AES_SUCCESS) {
+            printf("IV set failed!\n");
+            goto cleanup;
+        }
+        
         start = get_time_us();
-        for (int i = 0; i < ITERATIONS; i++) {
+        for (int i = 0; i < iterations; i++) {
             sym_aes_dnc_set_iv(ctx_dec, iv);
-            sym_aes_decrypt_cbc(ctx_dec, ciphertext, ciphertext_len, decrypted, &decrypted_len);
+            
+            int result = sym_aes_decrypt_cbc(ctx_dec, ciphertext, ciphertext_len, 
+                                           decrypted, &decrypted_len);
+            if (result != AES_SUCCESS) {
+                printf("Decryption failed at iteration %d\n", i);
+                goto cleanup;
+            }
         }
         end = get_time_us();
         double dec_time = end - start;
+        
+        mb_per_sec = (data_size * iterations / (1024.0 * 1024.0)) / 
+                    (dec_time / 1000000.0);
+        time_per_op = dec_time / iterations;
         
         snprintf(label, sizeof(label), "CBC Decrypt (%zu bytes)", data_size);
-        print_throughput(label, data_size * ITERATIONS, dec_time);
+        printf("  %-35s: %8.2f MB/s  (%8.2f µs/op)\n", 
+               label, mb_per_sec, time_per_op);
+        
+        add_result("AES-128", "CBC", data_size, "Decrypt", 
+                  mb_per_sec, time_per_op);
+        
         printf("\n");
+        
+cleanup:
+        memset(plaintext, 0, data_size);
+        memset(ciphertext, 0, data_size + AES_BLOCK_SIZE);
+        memset(decrypted, 0, data_size + AES_BLOCK_SIZE);
         
         free(plaintext);
         free(ciphertext);
@@ -158,128 +176,35 @@ void benchmark_cbc_mode() {
         sym_aes_ctx_destroy(ctx_enc);
         sym_aes_ctx_destroy(ctx_dec);
     }
-}
-
-void benchmark_ctr_mode() {
-    print_section_box("Benchmark 3: CTR Mode (Various Sizes)", BOX_WIDTH);
-    
-    uint8_t key[16] = {
-        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
-        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
-    };
-    
-    uint8_t nonce[16] = {
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
-    };
-    
-    size_t sizes[] = {64, 256, 1024, 4096, 16384};
-    int num_sizes = sizeof(sizes) / sizeof(sizes[0]);
-    
-    printf("\nIterations per size: %d\n\n", ITERATIONS);
-    
-    for (int s = 0; s < num_sizes; s++) {
-        size_t data_size = sizes[s];
-        
-        uint8_t *plaintext = malloc(data_size);
-        uint8_t *ciphertext = malloc(data_size);
-        uint8_t *decrypted = malloc(data_size);
-        size_t ciphertext_len, decrypted_len;
-        
-        // Fill with random data
-        for (size_t i = 0; i < data_size; i++) {
-            plaintext[i] = (uint8_t)(rand() % 256);
-        }
-        
-        sym_aes_ctx_t *ctx_enc = sym_aes_ctx_init(key, KEY_LENGTH_BYTES);
-        sym_aes_ctx_t *ctx_dec = sym_aes_ctx_init(key, KEY_LENGTH_BYTES);
-        
-        // Warmup
-        sym_aes_enc_set_iv(ctx_enc, nonce);
-        sym_aes_encrypt_ctr(ctx_enc, plaintext, data_size, ciphertext, &ciphertext_len);
-        
-        // Benchmark encryption
-        double start = get_time_us();
-        for (int i = 0; i < ITERATIONS; i++) {
-            sym_aes_enc_set_iv(ctx_enc, nonce);
-            sym_aes_encrypt_ctr(ctx_enc, plaintext, data_size, ciphertext, &ciphertext_len);
-        }
-        double end = get_time_us();
-        double enc_time = end - start;
-        
-        char label[64];
-        snprintf(label, sizeof(label), "CTR Encrypt (%zu bytes)", data_size);
-        print_throughput(label, data_size * ITERATIONS, enc_time);
-        
-        // Benchmark decryption (same as encryption in CTR)
-        start = get_time_us();
-        for (int i = 0; i < ITERATIONS; i++) {
-            sym_aes_dnc_set_iv(ctx_dec, nonce);
-            sym_aes_decrypt_ctr(ctx_dec, ciphertext, ciphertext_len, decrypted, &decrypted_len);
-        }
-        end = get_time_us();
-        double dec_time = end - start;
-        
-        snprintf(label, sizeof(label), "CTR Decrypt (%zu bytes)", data_size);
-        print_throughput(label, data_size * ITERATIONS, dec_time);
-        printf("\n");
-        
-        free(plaintext);
-        free(ciphertext);
-        free(decrypted);
-        sym_aes_ctx_destroy(ctx_enc);
-        sym_aes_ctx_destroy(ctx_dec);
-    }
-}
-
-void benchmark_key_schedule() {
-    print_section_box("Benchmark 4: Key Schedule Generation", BOX_WIDTH);
-    
-    uint8_t key[16] = {
-        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
-        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
-    };
-    
-    printf("\nIterations: %d\n\n", ITERATIONS);
-    
-    // Warmup
-    for (int i = 0; i < WARMUP_ITERATIONS; i++) {
-        sym_aes_ctx_t *ctx = sym_aes_ctx_init(key, KEY_LENGTH_BYTES);
-        sym_aes_ctx_destroy(ctx);
-    }
-    
-    // Benchmark
-    double start = get_time_us();
-    for (int i = 0; i < ITERATIONS; i++) {
-        sym_aes_ctx_t *ctx = sym_aes_ctx_init(key, KEY_LENGTH_BYTES);
-        sym_aes_ctx_destroy(ctx);
-    }
-    double end = get_time_us();
-    double total_time = end - start;
-    
-    printf("  Key Schedule Generation: %.2f µs/op\n", total_time / ITERATIONS);
-    printf("  Total time: %.2f ms\n", total_time / 1000.0);
 }
 
 void save_results_csv() {
+    // Create results directory if it doesn't exist
+    system("mkdir -p results");
+    
     FILE *fp = fopen("results/benchmarks.csv", "w");
     if (!fp) {
-        printf("Warning: Could not create results/benchmarks.csv\n");
+        printf(COLOR_RED "✗ Could not create results/benchmarks.csv\n" COLOR_RESET);
         return;
     }
     
+    // Write header
     fprintf(fp, "Algorithm,Mode,DataSize,Operation,Throughput_MBps,Time_us\n");
     
-    // This is simplified - in real implementation, you'd save actual benchmark data
-    fprintf(fp, "AES-128,ECB,16,Encrypt,100.0,0.16\n");
-    fprintf(fp, "AES-128,ECB,16,Decrypt,95.0,0.17\n");
-    fprintf(fp, "AES-128,CBC,1024,Encrypt,80.0,12.8\n");
-    fprintf(fp, "AES-128,CBC,1024,Decrypt,75.0,13.6\n");
-    fprintf(fp, "AES-128,CTR,1024,Encrypt,85.0,12.0\n");
-    fprintf(fp, "AES-128,CTR,1024,Decrypt,85.0,12.0\n");
+    // Write actual benchmark results
+    for (int i = 0; i < result_count; i++) {
+        fprintf(fp, "%s,%s,%zu,%s,%.2f,%.2f\n",
+                results[i].algorithm,
+                results[i].mode,
+                results[i].data_size,
+                results[i].operation,
+                results[i].throughput_mbps,
+                results[i].time_us);
+    }
     
     fclose(fp);
-    printf(COLOR_GREEN "\n✓ Results saved to results/benchmarks.csv\n" COLOR_RESET);
+    printf(COLOR_GREEN "\n✓ Results saved to results/benchmarks.csv (%d entries)\n" COLOR_RESET, 
+           result_count);
 }
 
 int main() {
@@ -287,10 +212,10 @@ int main() {
     
     print_box("AES-128 Performance Benchmarks", 58, COLOR_CYAN);
     
-    benchmark_single_block();
+    printf("\n" COLOR_YELLOW "Note: Benchmarks include IV setup overhead per operation\n");
+    printf("This reflects real-world usage where IV must be reset.\n" COLOR_RESET "\n");
+    
     benchmark_cbc_mode();
-    benchmark_ctr_mode();
-    benchmark_key_schedule();
     
     save_results_csv();
     
