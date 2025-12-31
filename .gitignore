@@ -60,10 +60,6 @@ results/*.txt
 *~
 .DS_Store
 
-# Compiled binaries
-bench_*
-example_*
-
 # Debug files
 *.dSYM/
 *.su

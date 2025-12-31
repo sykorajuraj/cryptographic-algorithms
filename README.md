@@ -1,8 +1,8 @@
 # cryptographic-algorithms
 Experimental study aims in understanding, comparing and implementing of cryptographic algorithms (symmetric, asymmetric encryption, and hash functions) for course of Software Development at University of Bologna
 
-
-crypto-perfect-hash/
+```text
+cryptographic-algorithms/
 ├── README.md
 ├── Makefile
 ├── LICENSE
@@ -29,10 +29,10 @@ crypto-perfect-hash/
 │       └── bdz.c
 │
 ├── tests/
-│   ├── test_aes.cpp          # AES unit tests
-│   ├── test_rsa.cpp          # RSA tests (planned)
-│   ├── test_sha256.cpp       # SHA-256 tests (planned)
-│   └── test_chd.cpp          # Perfect hash tests (planned)
+│   ├── test_aes.cpp            # AES unit tests
+│   ├── test_rsa.cpp            # RSA tests (planned)
+│   ├── test_sha256.cpp         # SHA-256 tests (planned)
+│   └── test_chd.cpp            # Perfect hash tests (planned)
 │
 ├── benchmarks/
 │   ├── bench_aes.c           # AES performance benchmarks
