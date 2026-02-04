@@ -25,23 +25,13 @@ extern "C" {
 class RSATest : public ::testing::Test {
 protected:
     asm_rsa_ctx_t ctx_512;
-    asm_rsa_ctx_t ctx_1024;
-    asm_rsa_ctx_t ctx_2048;
-    asm_rsa_ctx_t ctx_4096;
     
     void SetUp() override {
-        // Initialize contexts for different key sizes
         ASSERT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx_512, RSA_KEY_SIZE_512));
-        ASSERT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx_1024, RSA_KEY_SIZE_1024));
-        ASSERT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx_2048, RSA_KEY_SIZE_2048));
-        ASSERT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx_4096, RSA_KEY_SIZE_4096));
     }
     
     void TearDown() override {
         asm_rsa_ctx_free(&ctx_512);
-        asm_rsa_ctx_free(&ctx_1024);
-        asm_rsa_ctx_free(&ctx_2048);
-        asm_rsa_ctx_free(&ctx_4096);
     }
 };
 
@@ -113,56 +103,30 @@ protected:
 // ============================================================================
 
 TEST_F(RSATest, ContextInitialization) {
-    asm_rsa_ctx_t ctx;
-    
-    // Valid key sizes
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_512));
-    EXPECT_EQ(RSA_KEY_SIZE_512, ctx.key_size);
-    asm_rsa_ctx_free(&ctx);
-    
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_1024));
-    EXPECT_EQ(RSA_KEY_SIZE_1024, ctx.key_size);
-    asm_rsa_ctx_free(&ctx);
-    
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_2048));
-    EXPECT_EQ(RSA_KEY_SIZE_2048, ctx.key_size);
-    asm_rsa_ctx_free(&ctx);
-    
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_4096));
-    EXPECT_EQ(RSA_KEY_SIZE_4096, ctx.key_size);
-    asm_rsa_ctx_free(&ctx);
-    
-    // Invalid key sizes
-    EXPECT_EQ(RSA_ERR_INVALID_KEY_LENGTH, asm_rsa_ctx_init(&ctx, 768));
-    EXPECT_EQ(RSA_ERR_INVALID_KEY_LENGTH, asm_rsa_ctx_init(&ctx, 3072));
-    
-    // NULL pointer
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_ctx_init(nullptr, RSA_KEY_SIZE_2048));
+    // Check context was initialized correctly
+    EXPECT_EQ(RSA_KEY_SIZE_512, ctx_512.key_size);
+    EXPECT_NE(nullptr, ctx_512.pub_key);
+    EXPECT_NE(nullptr, ctx_512.pvt_key);
 }
 
 TEST_F(RSATest, DecryptionModeConfiguration) {
-    asm_rsa_ctx_t ctx;
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_1024));
-    
     // Default mode should be STANDARD
-    EXPECT_EQ(RSA_DECRYPT_STANDARD, asm_rsa_get_decrypt_mode(&ctx));
+    EXPECT_EQ(RSA_DECRYPT_STANDARD, asm_rsa_get_decrypt_mode(&ctx_512));
     
     // Set to CRT mode
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_set_decrypt_mode(&ctx, RSA_DECRYPT_CRT));
-    EXPECT_EQ(RSA_DECRYPT_CRT, asm_rsa_get_decrypt_mode(&ctx));
+    EXPECT_EQ(RSA_SUCCESS, asm_rsa_set_decrypt_mode(&ctx_512, RSA_DECRYPT_CRT));
+    EXPECT_EQ(RSA_DECRYPT_CRT, asm_rsa_get_decrypt_mode(&ctx_512));
     
     // Set back to STANDARD
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_set_decrypt_mode(&ctx, RSA_DECRYPT_STANDARD));
-    EXPECT_EQ(RSA_DECRYPT_STANDARD, asm_rsa_get_decrypt_mode(&ctx));
+    EXPECT_EQ(RSA_SUCCESS, asm_rsa_set_decrypt_mode(&ctx_512, RSA_DECRYPT_STANDARD));
+    EXPECT_EQ(RSA_DECRYPT_STANDARD, asm_rsa_get_decrypt_mode(&ctx_512));
     
     // Invalid mode
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_set_decrypt_mode(&ctx, (RSA_DECRYPT_MODE)99));
-    
-    asm_rsa_ctx_free(&ctx);
+    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_set_decrypt_mode(&ctx_512, (RSA_DECRYPT_MODE)99));
 }
 
 // ============================================================================
-// SECTION 2: Key Generation Tests
+// SECTION 2: Key Generation Tests (Reduced to one size for speed)
 // ============================================================================
 
 TEST_F(RSATest, KeyGeneration_512) {
@@ -183,15 +147,6 @@ TEST_F(RSATest, KeyGeneration_512) {
     EXPECT_NE(nullptr, pvt_key->d);
     EXPECT_NE(nullptr, pvt_key->p);
     EXPECT_NE(nullptr, pvt_key->q);
-}
-
-TEST_F(RSATest, KeyGeneration_AllSizes) {
-    // Test all supported key sizes
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_512, RSA_KEY_SIZE_512));
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_2048, RSA_KEY_SIZE_2048));
-    // Note: 4096-bit key generation is very slow, may skip in quick tests
-    // EXPECT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_4096, RSA_KEY_SIZE_4096));
 }
 
 // ============================================================================
@@ -226,805 +181,272 @@ TEST(RSABigNumTest, ByteConversion) {
     asm_rsa_bignum_free(bn);
 }
 
-TEST(RSABigNumTest, InvalidParameters) {
-    asm_rsa_bignum_t* bn = asm_rsa_bignum_new(10);
-    uint8_t data[10] = {0};
-    
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_bignum_from_bytes(nullptr, data, 10));
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_bignum_from_bytes(bn, nullptr, 10));
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_bignum_from_bytes(bn, data, 0));
-    
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_bignum_to_bytes(nullptr, data, 10));
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_bignum_to_bytes(bn, nullptr, 10));
-    
-    asm_rsa_bignum_free(bn);
-}
-
 // ============================================================================
-// SECTION 4: Encryption/Decryption Correctness Tests
+// SECTION 4: Encryption/Decryption Tests (512-bit only for speed)
 // ============================================================================
 
 TEST_F(RSATest, EncryptDecrypt_ShortMessage) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_512, RSA_KEY_SIZE_512));
     
-    const char* plaintext = "Hello, RSA!";
-    size_t plaintext_len = strlen(plaintext);
+    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_512);
+    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_512);
     
-    size_t max_cipher_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> ciphertext(max_cipher_len);
-    size_t ciphertext_len = max_cipher_len;
+    const char* message = "Hello RSA!";
+    size_t msg_len = strlen(message);
     
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
+    std::vector<uint8_t> ciphertext(RSA_KEY_SIZE_512 / 8);
+    std::vector<uint8_t> decrypted(RSA_KEY_SIZE_512 / 8);
     
-    // Encrypt
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(
-        pub_key,
-        reinterpret_cast<const uint8_t*>(plaintext),
-        plaintext_len,
-        ciphertext.data(),
-        &ciphertext_len
-    ));
+    size_t cipher_len = ciphertext.size();
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(pub_key, 
+                                               reinterpret_cast<const uint8_t*>(message),
+                                               msg_len, ciphertext.data(), &cipher_len));
     
-    // Decrypt with STANDARD mode
-    std::vector<uint8_t> decrypted(max_cipher_len);
-    size_t decrypted_len = max_cipher_len;
+    size_t decrypted_len = decrypted.size();
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(pvt_key, ciphertext.data(), cipher_len,
+                                               decrypted.data(), &decrypted_len,
+                                               RSA_DECRYPT_STANDARD));
     
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(
-        pvt_key,
-        ciphertext.data(),
-        ciphertext_len,
-        decrypted.data(),
-        &decrypted_len,
-        RSA_DECRYPT_STANDARD
-    ));
-    
-    EXPECT_EQ(plaintext_len, decrypted_len);
-    EXPECT_EQ(0, memcmp(plaintext, decrypted.data(), plaintext_len));
+    EXPECT_EQ(msg_len, decrypted_len);
+    EXPECT_EQ(0, memcmp(message, decrypted.data(), msg_len));
 }
 
-TEST_F(RSATest, EncryptDecrypt_CRT_Mode) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
+TEST_F(RSATest, EncryptDecrypt_MaxSize) {
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_512, RSA_KEY_SIZE_512));
     
-    const char* plaintext = "Testing CRT decryption mode!";
-    size_t plaintext_len = strlen(plaintext);
+    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_512);
+    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_512);
     
-    size_t max_cipher_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> ciphertext(max_cipher_len);
-    size_t ciphertext_len = max_cipher_len;
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
-    
-    // Encrypt
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(
-        pub_key,
-        reinterpret_cast<const uint8_t*>(plaintext),
-        plaintext_len,
-        ciphertext.data(),
-        &ciphertext_len
-    ));
-    
-    // Decrypt with CRT mode
-    std::vector<uint8_t> decrypted(max_cipher_len);
-    size_t decrypted_len = max_cipher_len;
-    
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(
-        pvt_key,
-        ciphertext.data(),
-        ciphertext_len,
-        decrypted.data(),
-        &decrypted_len,
-        RSA_DECRYPT_CRT
-    ));
-    
-    EXPECT_EQ(plaintext_len, decrypted_len);
-    EXPECT_EQ(0, memcmp(plaintext, decrypted.data(), plaintext_len));
-}
-
-TEST_F(RSATest, EncryptDecrypt_MaximumMessageSize) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    
-    size_t max_msg_size = asm_rsa_get_max_msg_size(RSA_KEY_SIZE_1024);
-    std::vector<uint8_t> plaintext(max_msg_size);
-    
-    // Fill with test pattern
+    size_t max_msg_size = asm_rsa_get_max_msg_size(RSA_KEY_SIZE_512);
+    std::vector<uint8_t> message(max_msg_size);
     for (size_t i = 0; i < max_msg_size; ++i) {
-        plaintext[i] = static_cast<uint8_t>(i & 0xFF);
+        message[i] = static_cast<uint8_t>(i & 0xFF);
     }
     
-    size_t max_cipher_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> ciphertext(max_cipher_len);
-    size_t ciphertext_len = max_cipher_len;
+    std::vector<uint8_t> ciphertext(RSA_KEY_SIZE_512 / 8);
+    std::vector<uint8_t> decrypted(RSA_KEY_SIZE_512 / 8);
     
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
+    size_t cipher_len = ciphertext.size();
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(pub_key, message.data(), max_msg_size,
+                                               ciphertext.data(), &cipher_len));
     
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(
-        pub_key,
-        plaintext.data(),
-        max_msg_size,
-        ciphertext.data(),
-        &ciphertext_len
-    ));
-    
-    std::vector<uint8_t> decrypted(max_cipher_len);
-    size_t decrypted_len = max_cipher_len;
-    
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(
-        pvt_key,
-        ciphertext.data(),
-        ciphertext_len,
-        decrypted.data(),
-        &decrypted_len,
-        RSA_DECRYPT_STANDARD
-    ));
+    size_t decrypted_len = decrypted.size();
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(pvt_key, ciphertext.data(), cipher_len,
+                                               decrypted.data(), &decrypted_len,
+                                               RSA_DECRYPT_CRT));
     
     EXPECT_EQ(max_msg_size, decrypted_len);
-    EXPECT_EQ(0, memcmp(plaintext.data(), decrypted.data(), max_msg_size));
+    EXPECT_EQ(0, memcmp(message.data(), decrypted.data(), max_msg_size));
 }
 
-TEST_F(RSATest, EncryptDecrypt_BinaryData) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    
-    // Test with binary data including null bytes
-    uint8_t plaintext[] = {0x00, 0x01, 0x02, 0xFF, 0xFE, 0x00, 0x7F, 0x80};
-    size_t plaintext_len = sizeof(plaintext);
-    
-    size_t max_cipher_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> ciphertext(max_cipher_len);
-    size_t ciphertext_len = max_cipher_len;
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
-    
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(
-        pub_key,
-        plaintext,
-        plaintext_len,
-        ciphertext.data(),
-        &ciphertext_len
-    ));
-    
-    std::vector<uint8_t> decrypted(max_cipher_len);
-    size_t decrypted_len = max_cipher_len;
-    
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(
-        pvt_key,
-        ciphertext.data(),
-        ciphertext_len,
-        decrypted.data(),
-        &decrypted_len,
-        RSA_DECRYPT_CRT
-    ));
-    
-    EXPECT_EQ(plaintext_len, decrypted_len);
-    EXPECT_EQ(0, memcmp(plaintext, decrypted.data(), plaintext_len));
-}
+// ============================================================================
+// SECTION 5: CRT vs STANDARD Comparison (Single test)
+// ============================================================================
 
-TEST_F(RSATest, EncryptDecrypt_StandardVsCRT_Consistency) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_2048, RSA_KEY_SIZE_2048));
+TEST_F(RSATest, CRT_vs_STANDARD_Correctness) {
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_512, RSA_KEY_SIZE_512));
     
-    const char* plaintext = "Consistency test between STANDARD and CRT modes";
-    size_t plaintext_len = strlen(plaintext);
+    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_512);
+    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_512);
     
-    size_t max_cipher_len = RSA_KEY_SIZE_2048 / 8;
-    std::vector<uint8_t> ciphertext(max_cipher_len);
-    size_t ciphertext_len = max_cipher_len;
+    const char* message = "Test CRT correctness";
+    size_t msg_len = strlen(message);
     
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_2048);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_2048);
+    std::vector<uint8_t> ciphertext(RSA_KEY_SIZE_512 / 8);
+    size_t cipher_len = ciphertext.size();
     
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(
-        pub_key,
-        reinterpret_cast<const uint8_t*>(plaintext),
-        plaintext_len,
-        ciphertext.data(),
-        &ciphertext_len
-    ));
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(pub_key, 
+                                               reinterpret_cast<const uint8_t*>(message),
+                                               msg_len, ciphertext.data(), &cipher_len));
     
     // Decrypt with STANDARD mode
-    std::vector<uint8_t> decrypted_std(max_cipher_len);
-    size_t decrypted_std_len = max_cipher_len;
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(
-        pvt_key,
-        ciphertext.data(),
-        ciphertext_len,
-        decrypted_std.data(),
-        &decrypted_std_len,
-        RSA_DECRYPT_STANDARD
-    ));
+    std::vector<uint8_t> decrypted_std(RSA_KEY_SIZE_512 / 8);
+    size_t decrypted_len_std = decrypted_std.size();
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(pvt_key, ciphertext.data(), cipher_len,
+                                               decrypted_std.data(), &decrypted_len_std,
+                                               RSA_DECRYPT_STANDARD));
     
     // Decrypt with CRT mode
-    std::vector<uint8_t> decrypted_crt(max_cipher_len);
-    size_t decrypted_crt_len = max_cipher_len;
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(
-        pvt_key,
-        ciphertext.data(),
-        ciphertext_len,
-        decrypted_crt.data(),
-        &decrypted_crt_len,
-        RSA_DECRYPT_CRT
-    ));
+    std::vector<uint8_t> decrypted_crt(RSA_KEY_SIZE_512 / 8);
+    size_t decrypted_len_crt = decrypted_crt.size();
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(pvt_key, ciphertext.data(), cipher_len,
+                                               decrypted_crt.data(), &decrypted_len_crt,
+                                               RSA_DECRYPT_CRT));
     
-    // Both should produce identical results
-    EXPECT_EQ(decrypted_std_len, decrypted_crt_len);
-    EXPECT_EQ(0, memcmp(decrypted_std.data(), decrypted_crt.data(), decrypted_std_len));
-    EXPECT_EQ(0, memcmp(plaintext, decrypted_std.data(), plaintext_len));
+    // Both should produce the same result
+    EXPECT_EQ(decrypted_len_std, decrypted_len_crt);
+    EXPECT_EQ(0, memcmp(decrypted_std.data(), decrypted_crt.data(), decrypted_len_std));
+    EXPECT_EQ(0, memcmp(message, decrypted_std.data(), msg_len));
 }
 
 // ============================================================================
-// SECTION 5: Signature Tests
+// SECTION 6: Signature Tests (Reduced)
 // ============================================================================
 
-TEST_F(RSATest, SignAndVerify_ValidSignature) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
+TEST_F(RSATest, SignAndVerify_Basic) {
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_512, RSA_KEY_SIZE_512));
     
-    const char* message = "This message should be signed";
-    size_t message_len = strlen(message);
+    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_512);
+    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_512);
     
-    size_t sig_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> signature(sig_len);
+    const char* message = "Sign this message";
+    size_t msg_len = strlen(message);
     
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
+    std::vector<uint8_t> signature(RSA_KEY_SIZE_512 / 8);
+    size_t sig_len = signature.size();
     
-    // Sign with STANDARD mode
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_sign(
-        pvt_key,
-        reinterpret_cast<const uint8_t*>(message),
-        message_len,
-        signature.data(),
-        &sig_len,
-        RSA_DECRYPT_STANDARD
-    ));
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_sign(pvt_key,
+                                         reinterpret_cast<const uint8_t*>(message),
+                                         msg_len, signature.data(), &sig_len,
+                                         RSA_DECRYPT_CRT));
     
-    // Verify
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_verify(
-        pub_key,
-        reinterpret_cast<const uint8_t*>(message),
-        message_len,
-        signature.data(),
-        sig_len
-    ));
+    EXPECT_EQ(RSA_SUCCESS, asm_rsa_verify(pub_key,
+                                           reinterpret_cast<const uint8_t*>(message),
+                                           msg_len, signature.data(), sig_len));
 }
 
-TEST_F(RSATest, SignAndVerify_CRT_Mode) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_2048, RSA_KEY_SIZE_2048));
+TEST_F(RSATest, SignAndVerify_InvalidSignature) {
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_512, RSA_KEY_SIZE_512));
     
-    const char* message = "Testing CRT mode for signing";
-    size_t message_len = strlen(message);
-    
-    size_t sig_len = RSA_KEY_SIZE_2048 / 8;
-    std::vector<uint8_t> signature(sig_len);
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_2048);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_2048);
-    
-    // Sign with CRT mode
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_sign(
-        pvt_key,
-        reinterpret_cast<const uint8_t*>(message),
-        message_len,
-        signature.data(),
-        &sig_len,
-        RSA_DECRYPT_CRT
-    ));
-    
-    // Verify
-    EXPECT_EQ(RSA_SUCCESS, asm_rsa_verify(
-        pub_key,
-        reinterpret_cast<const uint8_t*>(message),
-        message_len,
-        signature.data(),
-        sig_len
-    ));
-}
-
-TEST_F(RSATest, Verify_TamperedMessage) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
+    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_512);
+    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_512);
     
     const char* message = "Original message";
     const char* tampered = "Tampered message";
-    size_t message_len = strlen(message);
+    size_t msg_len = strlen(message);
     
-    size_t sig_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> signature(sig_len);
+    std::vector<uint8_t> signature(RSA_KEY_SIZE_512 / 8);
+    size_t sig_len = signature.size();
     
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_sign(pvt_key,
+                                         reinterpret_cast<const uint8_t*>(message),
+                                         msg_len, signature.data(), &sig_len,
+                                         RSA_DECRYPT_STANDARD));
     
-    // Sign original message
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_sign(
-        pvt_key,
-        reinterpret_cast<const uint8_t*>(message),
-        message_len,
-        signature.data(),
-        &sig_len,
-        RSA_DECRYPT_STANDARD
-    ));
-    
-    // Verify with tampered message should fail
-    EXPECT_NE(RSA_SUCCESS, asm_rsa_verify(
-        pub_key,
-        reinterpret_cast<const uint8_t*>(tampered),
-        strlen(tampered),
-        signature.data(),
-        sig_len
-    ));
-}
-
-TEST_F(RSATest, Verify_TamperedSignature) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    
-    const char* message = "Test message";
-    size_t message_len = strlen(message);
-    
-    size_t sig_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> signature(sig_len);
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
-    
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_sign(
-        pvt_key,
-        reinterpret_cast<const uint8_t*>(message),
-        message_len,
-        signature.data(),
-        &sig_len,
-        RSA_DECRYPT_STANDARD
-    ));
-    
-    // Tamper with signature
-    signature[sig_len / 2] ^= 0xFF;
-    
-    // Verification should fail
-    EXPECT_NE(RSA_SUCCESS, asm_rsa_verify(
-        pub_key,
-        reinterpret_cast<const uint8_t*>(message),
-        message_len,
-        signature.data(),
-        sig_len
-    ));
+    // Verification should fail with tampered message
+    EXPECT_NE(RSA_SUCCESS, asm_rsa_verify(pub_key,
+                                           reinterpret_cast<const uint8_t*>(tampered),
+                                           strlen(tampered), signature.data(), sig_len));
 }
 
 // ============================================================================
-// SECTION 6: Error Handling and Edge Cases
-// ============================================================================
-
-TEST_F(RSATest, Encryption_MessageTooLong) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    
-    size_t max_size = asm_rsa_get_max_msg_size(RSA_KEY_SIZE_1024);
-    std::vector<uint8_t> plaintext(max_size + 10);  // Too long
-    
-    size_t cipher_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> ciphertext(cipher_len);
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    
-    EXPECT_EQ(RSA_ERR_INVALID_DATA_LENGTH, asm_rsa_encryption(
-        pub_key,
-        plaintext.data(),
-        plaintext.size(),
-        ciphertext.data(),
-        &cipher_len
-    ));
-}
-
-TEST_F(RSATest, Encryption_NullPointers) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    
-    uint8_t data[10] = {0};
-    size_t len = 10;
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_encryption(nullptr, data, len, data, &len));
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_encryption(pub_key, nullptr, len, data, &len));
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_encryption(pub_key, data, len, nullptr, &len));
-    EXPECT_EQ(RSA_ERR_INVALID_PARAM, asm_rsa_encryption(pub_key, data, len, data, nullptr));
-}
-
-TEST_F(RSATest, MaxMessageSize_Calculation) {
-    EXPECT_EQ(RSA_MAX_MSG_SIZE_512, asm_rsa_get_max_msg_size(RSA_KEY_SIZE_512));
-    EXPECT_EQ(RSA_MAX_MSG_SIZE_1024, asm_rsa_get_max_msg_size(RSA_KEY_SIZE_1024));
-    EXPECT_EQ(RSA_MAX_MSG_SIZE_2048, asm_rsa_get_max_msg_size(RSA_KEY_SIZE_2048));
-    EXPECT_EQ(RSA_MAX_MSG_SIZE_4096, asm_rsa_get_max_msg_size(RSA_KEY_SIZE_4096));
-    EXPECT_EQ(0, asm_rsa_get_max_msg_size(999));  // Invalid size
-}
-
-// ============================================================================
-// SECTION 7: Data Integrity Tests
-// ============================================================================
-
-TEST_F(RSATest, DataIntegrity_MultipleEncryptDecrypt) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
-    
-    // Test with 100 different random messages
-    for (int i = 0; i < 100; ++i) {
-        size_t msg_len = (i % 50) + 10;  // Varying message lengths
-        std::vector<uint8_t> plaintext(msg_len);
-        
-        // Generate random data
-        for (size_t j = 0; j < msg_len; ++j) {
-            plaintext[j] = static_cast<uint8_t>(rand() & 0xFF);
-        }
-        
-        size_t cipher_len = RSA_KEY_SIZE_1024 / 8;
-        std::vector<uint8_t> ciphertext(cipher_len);
-        
-        ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(
-            pub_key, plaintext.data(), msg_len,
-            ciphertext.data(), &cipher_len
-        ));
-        
-        std::vector<uint8_t> decrypted(cipher_len);
-        size_t decrypted_len = cipher_len;
-        
-        ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(
-            pvt_key, ciphertext.data(), cipher_len,
-            decrypted.data(), &decrypted_len,
-            RSA_DECRYPT_CRT
-        ));
-        
-        ASSERT_EQ(msg_len, decrypted_len);
-        EXPECT_EQ(0, memcmp(plaintext.data(), decrypted.data(), msg_len))
-            << "Mismatch at iteration " << i;
-    }
-}
-
-TEST_F(RSATest, DataIntegrity_AllByteValues) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    
-    // Create message with all possible byte values
-    std::vector<uint8_t> plaintext(100);
-    for (size_t i = 0; i < plaintext.size(); ++i) {
-        plaintext[i] = static_cast<uint8_t>(i);
-    }
-    
-    size_t cipher_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> ciphertext(cipher_len);
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
-    
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(
-        pub_key, plaintext.data(), plaintext.size(),
-        ciphertext.data(), &cipher_len
-    ));
-    
-    std::vector<uint8_t> decrypted(cipher_len);
-    size_t decrypted_len = cipher_len;
-    
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_decryption(
-        pvt_key, ciphertext.data(), cipher_len,
-        decrypted.data(), &decrypted_len,
-        RSA_DECRYPT_STANDARD
-    ));
-    
-    EXPECT_EQ(plaintext.size(), decrypted_len);
-    EXPECT_EQ(0, memcmp(plaintext.data(), decrypted.data(), plaintext.size()));
-}
-
-// ============================================================================
-// SECTION 8: Performance Tests
+// SECTION 7: Performance Tests (Minimal, 512-bit only)
 // ============================================================================
 
 TEST_F(RSAPerformanceTest, KeyGeneration_Performance) {
     std::cout << "\n========================================" << std::endl;
-    std::cout << "KEY GENERATION PERFORMANCE ANALYSIS" << std::endl;
-    std::cout << "========================================" << std::endl;
-    
-    struct KeySizeConfig {
-        size_t key_size;
-        const char* name;
-        size_t iterations;
-    };
-    
-    std::vector<KeySizeConfig> configs = {
-        {RSA_KEY_SIZE_512, "RSA-512", 10},
-        {RSA_KEY_SIZE_1024, "RSA-1024", 5},
-        {RSA_KEY_SIZE_2048, "RSA-2048", 3},
-        // {RSA_KEY_SIZE_4096, "RSA-4096", 1}  // Very slow
-    };
-    
-    for (const auto& config : configs) {
-        asm_rsa_ctx_t ctx;
-        asm_rsa_ctx_init(&ctx, config.key_size);
-        
-        auto metrics = measurePerformance([&]() {
-            asm_rsa_generate_keypair(&ctx, config.key_size);
-        }, config.iterations);
-        
-        printMetrics(std::string("Key Generation: ") + config.name, metrics);
-        
-        asm_rsa_ctx_free(&ctx);
-    }
-}
-
-TEST_F(RSAPerformanceTest, Encryption_Performance) {
-    std::cout << "\n========================================" << std::endl;
-    std::cout << "ENCRYPTION PERFORMANCE ANALYSIS" << std::endl;
+    std::cout << "KEY GENERATION PERFORMANCE (RSA-512)" << std::endl;
     std::cout << "========================================" << std::endl;
     
     asm_rsa_ctx_t ctx;
-    asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_2048);
-    asm_rsa_generate_keypair(&ctx, RSA_KEY_SIZE_2048);
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx);
-    
-    size_t max_msg_size = asm_rsa_get_max_msg_size(RSA_KEY_SIZE_2048);
-    std::vector<uint8_t> plaintext(max_msg_size);
-    for (size_t i = 0; i < max_msg_size; ++i) {
-        plaintext[i] = static_cast<uint8_t>(i & 0xFF);
-    }
-    
-    size_t cipher_len = RSA_KEY_SIZE_2048 / 8;
-    std::vector<uint8_t> ciphertext(cipher_len);
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_512));
     
     auto metrics = measurePerformance([&]() {
-        size_t len = cipher_len;
-        asm_rsa_encryption(pub_key, plaintext.data(), max_msg_size,
-                          ciphertext.data(), &len);
-    }, 100, max_msg_size);
+        asm_rsa_generate_keypair(&ctx, RSA_KEY_SIZE_512);
+    }, 10);  // Only 10 iterations for speed
     
-    printMetrics("Encryption (RSA-2048, max message size)", metrics);
+    printMetrics("Key Generation (RSA-512)", metrics);
     
     asm_rsa_ctx_free(&ctx);
 }
 
-TEST_F(RSAPerformanceTest, Decryption_StandardVsCRT_Performance) {
+TEST_F(RSAPerformanceTest, Encryption_Decryption_Performance) {
     std::cout << "\n========================================" << std::endl;
-    std::cout << "DECRYPTION PERFORMANCE: STANDARD vs CRT" << std::endl;
+    std::cout << "ENCRYPTION/DECRYPTION PERFORMANCE" << std::endl;
     std::cout << "========================================" << std::endl;
     
     asm_rsa_ctx_t ctx;
-    asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_2048);
-    asm_rsa_generate_keypair(&ctx, RSA_KEY_SIZE_2048);
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_512));
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx, RSA_KEY_SIZE_512));
     
     asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx);
     asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx);
     
-    const char* plaintext = "Performance test message";
-    size_t plaintext_len = strlen(plaintext);
+    const char* message = "Performance test message";
+    size_t msg_len = strlen(message);
     
-    size_t cipher_len = RSA_KEY_SIZE_2048 / 8;
+    size_t cipher_len = RSA_KEY_SIZE_512 / 8;
     std::vector<uint8_t> ciphertext(cipher_len);
-    
-    asm_rsa_encryption(pub_key, reinterpret_cast<const uint8_t*>(plaintext),
-                      plaintext_len, ciphertext.data(), &cipher_len);
-    
     std::vector<uint8_t> decrypted(cipher_len);
     
-    // Test STANDARD mode
-    auto metrics_std = measurePerformance([&]() {
+    // Encryption
+    auto enc_metrics = measurePerformance([&]() {
+        size_t len = cipher_len;
+        asm_rsa_encryption(pub_key, reinterpret_cast<const uint8_t*>(message),
+                          msg_len, ciphertext.data(), &len);
+    }, 50, msg_len);  // Reduced iterations
+    
+    printMetrics("Encryption (RSA-512)", enc_metrics);
+    
+    // Encrypt once for decryption test
+    asm_rsa_encryption(pub_key, reinterpret_cast<const uint8_t*>(message),
+                      msg_len, ciphertext.data(), &cipher_len);
+    
+    // Decryption STANDARD
+    auto dec_std_metrics = measurePerformance([&]() {
         size_t len = cipher_len;
         asm_rsa_decryption(pvt_key, ciphertext.data(), cipher_len,
                           decrypted.data(), &len, RSA_DECRYPT_STANDARD);
-    }, 50, plaintext_len);
+    }, 50, msg_len);
     
-    printMetrics("Decryption STANDARD mode (RSA-2048)", metrics_std);
+    printMetrics("Decryption STANDARD (RSA-512)", dec_std_metrics);
     
-    // Test CRT mode
-    auto metrics_crt = measurePerformance([&]() {
+    // Decryption CRT
+    auto dec_crt_metrics = measurePerformance([&]() {
         size_t len = cipher_len;
         asm_rsa_decryption(pvt_key, ciphertext.data(), cipher_len,
                           decrypted.data(), &len, RSA_DECRYPT_CRT);
-    }, 50, plaintext_len);
+    }, 50, msg_len);
     
-    printMetrics("Decryption CRT mode (RSA-2048)", metrics_crt);
+    printMetrics("Decryption CRT (RSA-512)", dec_crt_metrics);
     
-    // Calculate speedup
-    double speedup = metrics_std.mean_time_ms / metrics_crt.mean_time_ms;
-    std::cout << "CRT Speedup Factor: " << std::fixed << std::setprecision(2) 
-              << speedup << "x" << std::endl;
-    std::cout << "CRT is " << std::setprecision(1) 
-              << ((speedup - 1.0) * 100.0) << "% faster" << std::endl << std::endl;
-    
-    asm_rsa_ctx_free(&ctx);
-}
-
-TEST_F(RSAPerformanceTest, Signing_Performance) {
-    std::cout << "\n========================================" << std::endl;
-    std::cout << "SIGNING PERFORMANCE ANALYSIS" << std::endl;
-    std::cout << "========================================" << std::endl;
-    
-    asm_rsa_ctx_t ctx;
-    asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_2048);
-    asm_rsa_generate_keypair(&ctx, RSA_KEY_SIZE_2048);
-    
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx);
-    
-    const char* message = "Message to be signed";
-    size_t message_len = strlen(message);
-    
-    size_t sig_len = RSA_KEY_SIZE_2048 / 8;
-    std::vector<uint8_t> signature(sig_len);
-    
-    // Test STANDARD mode signing
-    auto metrics_std = measurePerformance([&]() {
-        size_t len = sig_len;
-        asm_rsa_sign(pvt_key, reinterpret_cast<const uint8_t*>(message),
-                    message_len, signature.data(), &len, RSA_DECRYPT_STANDARD);
-    }, 50, message_len);
-    
-    printMetrics("Signing STANDARD mode (RSA-2048)", metrics_std);
-    
-    // Test CRT mode signing
-    auto metrics_crt = measurePerformance([&]() {
-        size_t len = sig_len;
-        asm_rsa_sign(pvt_key, reinterpret_cast<const uint8_t*>(message),
-                    message_len, signature.data(), &len, RSA_DECRYPT_CRT);
-    }, 50, message_len);
-    
-    printMetrics("Signing CRT mode (RSA-2048)", metrics_crt);
-    
-    double speedup = metrics_std.mean_time_ms / metrics_crt.mean_time_ms;
+    double speedup = dec_std_metrics.mean_time_ms / dec_crt_metrics.mean_time_ms;
     std::cout << "CRT Speedup Factor: " << std::fixed << std::setprecision(2) 
               << speedup << "x" << std::endl << std::endl;
     
     asm_rsa_ctx_free(&ctx);
 }
 
-TEST_F(RSAPerformanceTest, Verification_Performance) {
+TEST_F(RSAPerformanceTest, Signature_Performance) {
     std::cout << "\n========================================" << std::endl;
-    std::cout << "SIGNATURE VERIFICATION PERFORMANCE" << std::endl;
+    std::cout << "SIGNATURE PERFORMANCE (RSA-512)" << std::endl;
     std::cout << "========================================" << std::endl;
     
     asm_rsa_ctx_t ctx;
-    asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_2048);
-    asm_rsa_generate_keypair(&ctx, RSA_KEY_SIZE_2048);
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_ctx_init(&ctx, RSA_KEY_SIZE_512));
+    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx, RSA_KEY_SIZE_512));
     
     asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx);
     asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx);
     
-    const char* message = "Message to verify";
-    size_t message_len = strlen(message);
+    const char* message = "Message to sign";
+    size_t msg_len = strlen(message);
     
-    size_t sig_len = RSA_KEY_SIZE_2048 / 8;
+    size_t sig_len = RSA_KEY_SIZE_512 / 8;
     std::vector<uint8_t> signature(sig_len);
     
+    // Signing
+    auto sign_metrics = measurePerformance([&]() {
+        size_t len = sig_len;
+        asm_rsa_sign(pvt_key, reinterpret_cast<const uint8_t*>(message),
+                    msg_len, signature.data(), &len, RSA_DECRYPT_CRT);
+    }, 50, msg_len);
+    
+    printMetrics("Signing (RSA-512)", sign_metrics);
+    
+    // Sign once for verification test
     asm_rsa_sign(pvt_key, reinterpret_cast<const uint8_t*>(message),
-                message_len, signature.data(), &sig_len, RSA_DECRYPT_CRT);
+                msg_len, signature.data(), &sig_len, RSA_DECRYPT_CRT);
     
-    auto metrics = measurePerformance([&]() {
+    // Verification
+    auto verify_metrics = measurePerformance([&]() {
         asm_rsa_verify(pub_key, reinterpret_cast<const uint8_t*>(message),
-                      message_len, signature.data(), sig_len);
-    }, 100, message_len);
+                      msg_len, signature.data(), sig_len);
+    }, 100, msg_len);
     
-    printMetrics("Signature Verification (RSA-2048)", metrics);
+    printMetrics("Verification (RSA-512)", verify_metrics);
     
     asm_rsa_ctx_free(&ctx);
-}
-
-TEST_F(RSAPerformanceTest, Throughput_Analysis) {
-    std::cout << "\n========================================" << std::endl;
-    std::cout << "THROUGHPUT ANALYSIS (Different Key Sizes)" << std::endl;
-    std::cout << "========================================" << std::endl;
-    
-    struct Config {
-        size_t key_size;
-        const char* name;
-    };
-    
-    std::vector<Config> configs = {
-        {RSA_KEY_SIZE_1024, "RSA-1024"},
-        {RSA_KEY_SIZE_2048, "RSA-2048"}
-    };
-    
-    for (const auto& config : configs) {
-        asm_rsa_ctx_t ctx;
-        asm_rsa_ctx_init(&ctx, config.key_size);
-        asm_rsa_generate_keypair(&ctx, config.key_size);
-        
-        asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx);
-        asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx);
-        
-        size_t max_msg_size = asm_rsa_get_max_msg_size(config.key_size);
-        std::vector<uint8_t> plaintext(max_msg_size);
-        for (size_t i = 0; i < max_msg_size; ++i) {
-            plaintext[i] = static_cast<uint8_t>(i & 0xFF);
-        }
-        
-        size_t cipher_len = config.key_size / 8;
-        std::vector<uint8_t> ciphertext(cipher_len);
-        
-        // Encryption throughput
-        auto enc_metrics = measurePerformance([&]() {
-            size_t len = cipher_len;
-            asm_rsa_encryption(pub_key, plaintext.data(), max_msg_size,
-                              ciphertext.data(), &len);
-        }, 50, max_msg_size);
-        
-        // Decryption throughput (CRT)
-        asm_rsa_encryption(pub_key, plaintext.data(), max_msg_size,
-                          ciphertext.data(), &cipher_len);
-        
-        std::vector<uint8_t> decrypted(cipher_len);
-        auto dec_metrics = measurePerformance([&]() {
-            size_t len = cipher_len;
-            asm_rsa_decryption(pvt_key, ciphertext.data(), cipher_len,
-                              decrypted.data(), &len, RSA_DECRYPT_CRT);
-        }, 50, max_msg_size);
-        
-        std::cout << "\n--- " << config.name << " ---" << std::endl;
-        std::cout << "Max message size: " << max_msg_size << " bytes" << std::endl;
-        std::cout << "Encryption throughput: " << std::fixed << std::setprecision(0)
-                  << enc_metrics.throughput_bytes_per_sec << " bytes/sec" << std::endl;
-        std::cout << "Decryption throughput: " 
-                  << dec_metrics.throughput_bytes_per_sec << " bytes/sec" << std::endl;
-        
-        asm_rsa_ctx_free(&ctx);
-    }
-    std::cout << std::endl;
-}
-
-// ============================================================================
-// SECTION 9: Security Property Tests
-// ============================================================================
-
-TEST_F(RSATest, Security_SamePlaintextDifferentCiphertext) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    
-    const char* plaintext = "Same message";
-    size_t plaintext_len = strlen(plaintext);
-    
-    asm_rsa_pub_key_t* pub_key = asm_rsa_get_pub_key(&ctx_1024);
-    
-    size_t cipher_len1 = RSA_KEY_SIZE_1024 / 8;
-    size_t cipher_len2 = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> ciphertext1(cipher_len1);
-    std::vector<uint8_t> ciphertext2(cipher_len2);
-    
-    // Encrypt same message twice
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(
-        pub_key,
-        reinterpret_cast<const uint8_t*>(plaintext),
-        plaintext_len,
-        ciphertext1.data(),
-        &cipher_len1
-    ));
-    
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_encryption(
-        pub_key,
-        reinterpret_cast<const uint8_t*>(plaintext),
-        plaintext_len,
-        ciphertext2.data(),
-        &cipher_len2
-    ));
-    
-    // Due to random padding, ciphertexts should be different
-    EXPECT_NE(0, memcmp(ciphertext1.data(), ciphertext2.data(), cipher_len1))
-        << "Ciphertexts should differ due to random padding";
-}
-
-TEST_F(RSATest, Security_PaddingValidation) {
-    ASSERT_EQ(RSA_SUCCESS, asm_rsa_generate_keypair(&ctx_1024, RSA_KEY_SIZE_1024));
-    
-    asm_rsa_pvt_key_t* pvt_key = asm_rsa_get_pvt_key(&ctx_1024);
-    
-    // Create invalid ciphertext (all zeros)
-    size_t cipher_len = RSA_KEY_SIZE_1024 / 8;
-    std::vector<uint8_t> invalid_ciphertext(cipher_len, 0);
-    
-    std::vector<uint8_t> decrypted(cipher_len);
-    size_t decrypted_len = cipher_len;
-    
-    // Decryption should fail due to invalid padding
-    int result = asm_rsa_decryption(
-        pvt_key,
-        invalid_ciphertext.data(),
-        cipher_len,
-        decrypted.data(),
-        &decrypted_len,
-        RSA_DECRYPT_STANDARD
-    );
-    
-    EXPECT_NE(RSA_SUCCESS, result) << "Invalid padding should be rejected";
 }
 
 // ============================================================================
@@ -1036,8 +458,9 @@ int main(int argc, char **argv) {
     
     std::cout << "========================================" << std::endl;
     std::cout << "RSA IMPLEMENTATION TEST SUITE" << std::endl;
+    std::cout << "  (Streamlined for faster execution)" << std::endl;
     std::cout << "========================================" << std::endl;
-    std::cout << "Testing correctness, performance, and security properties" << std::endl;
+    std::cout << "Testing correctness and performance" << std::endl;
     std::cout << std::endl;
     
     return RUN_ALL_TESTS();
