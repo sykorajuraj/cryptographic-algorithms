@@ -12,7 +12,7 @@
 
 // Helper function to generate random bytes
 int random_bytes(uint8_t *buf, size_t len) {
-    int seeded = 0;
+    static int seeded = 0;  // Added static keyword
     if (!seeded) {
         srand(time(NULL));
         seeded = 1;
@@ -229,6 +229,17 @@ int asm_rsa_ctx_init(asm_rsa_ctx_t *ctx, size_t key_size) {
     ctx->key_size = key_size;
     ctx->decrypt_mode = RSA_DECRYPT_STANDARD;
     ctx->padding_mode = 1; // PKCS#1 v1.5
+
+    ctx->pub_key = asm_rsa_pub_key_new(key_size);
+    ctx->pvt_key = asm_rsa_pvt_key_new(key_size);
+
+    if (!ctx->pub_key || !ctx->pvt_key) {
+        asm_rsa_pub_key_free(ctx->pub_key);
+        asm_rsa_pvt_key_free(ctx->pvt_key);
+        ctx->pub_key = NULL;
+        ctx->pvt_key = NULL;
+        return RSA_ERR_MEMORY;
+    }
     
     return RSA_SUCCESS;
 }
@@ -320,23 +331,29 @@ int asm_rsa_bignum_from_bytes(asm_rsa_bignum_t *bn, const uint8_t *data, size_t 
 int asm_rsa_bignum_to_bytes(const asm_rsa_bignum_t *bn, uint8_t *data, size_t len) {
     if (!bn || !data) return RSA_ERR_INVALID_PARAM;
     
-    size_t bytes_needed = bn->used * 4;
-    if (bytes_needed > len) return RSA_ERR_INVALID_DATA_LENGTH;
-    
+    // Always zero the entire buffer first to handle padding/zeros
     memset(data, 0, len);
     
-    for (size_t i = 0; i < bn->used; i++) {
+    // Calculate how many words we actually have
+    size_t actual_words = bn->used;
+    while (actual_words > 0 && bn->data[actual_words - 1] == 0) {
+        actual_words--;
+    }
+    
+    if (actual_words == 0) return len; // Buffer is already all zeros
+
+    // Write bytes from the bignum into the END of the data buffer (Big-Endian)
+    for (size_t i = 0; i < actual_words; i++) {
+        uint32_t word = bn->data[i];
         for (int j = 0; j < 4; j++) {
-            size_t byte_idx = bytes_needed - 1 - (i * 4 + j);
-            if (byte_idx < len) {
-                data[byte_idx] = (bn->data[i] >> (j * 8)) & 0xFF;
+            size_t byte_pos = (i * 4) + j;
+            if (byte_pos < len) {
+                data[len - 1 - byte_pos] = (word >> (j * 8)) & 0xFF;
             }
         }
     }
-    
-    return bytes_needed;
+    return len;
 }
-
 // BIGNUM ARITHMETIC OPERATIONS
 
 /**
@@ -680,7 +697,7 @@ int bignum_mod_exp(asm_rsa_bignum_t *result,
 }
 
 /**
- * @brief Extended Euclidean Algorithm - FIXED VERSION
+ * @brief Extended Euclidean Algorithm
  * Computes gcd(a,b) and coefficients x,y such that ax + by = gcd(a,b)
  */
 int extended_gcd(asm_rsa_bignum_t *gcd,
@@ -721,7 +738,6 @@ int extended_gcd(asm_rsa_bignum_t *gcd,
     t->data[0] = 1; t->used = 1;
     
     while (!(r->used == 1 && r->data[0] == 0)) {
-        // *** THIS IS THE KEY FIX ***
         // Use efficient division instead of repeated subtraction
         int ret = bignum_div(quotient, temp, old_r, r);
         if (ret != RSA_SUCCESS) {
@@ -1439,6 +1455,26 @@ int asm_rsa_decryption(const asm_rsa_pvt_key_t *pvt_key,
         
         ret = asm_rsa_bignum_to_bytes(m, padded, key_bytes);
         
+        if (padded[0] != 0x00 || padded[1] != 0x02) {
+            ret = RSA_ERR_DECRYPTION_FAILED; // -5
+        } else {
+            // Find the 0x00 separator after the PS (padding string)
+            size_t i = 2;
+            while (i < key_bytes && padded[i] != 0x00) {
+                i++;
+            }
+
+            if (i >= key_bytes || i < 10) {
+                ret = RSA_ERR_DECRYPTION_FAILED;
+            } else {
+                i++; // Move past the 0x00 separator
+                size_t actual_len = key_bytes - i;
+                memcpy(plaintext, &padded[i], actual_len);
+                *plaintext_len = actual_len;
+                ret = RSA_SUCCESS;
+            }
+        }
+
         if (ret >= 0) {
             // Remove PKCS#1 padding
             ret = pkcs1_unpad(padded, key_bytes, plaintext, plaintext_len);
@@ -1500,14 +1536,24 @@ int rsa_decrypt_crt(asm_rsa_bignum_t *m,
     ret = bignum_mod_exp(m2, c_mod_q, key->dq, key->q);
     if (ret != RSA_SUCCESS) goto cleanup;
     
-    // h = (m1 - m2) * qinv mod p
-    if (bignum_cmp(m1, m2) >= 0) {
-        bignum_sub(h, m1, m2);
-    } else {
-        // m1 < m2, so add p to m1 first
-        bignum_add(temp, m1, key->p);
-        bignum_sub(h, temp, m2);
+    // h = ((m1 - m2) mod p) * qinv mod p
+    asm_rsa_bignum_t *m2_mod_p = asm_rsa_bignum_new(key->p->size + 1);
+    if (!m2_mod_p) {
+        ret = RSA_ERR_MEMORY;
+        goto cleanup;
     }
+    
+    bignum_mod(m2_mod_p, m2, key->p);
+    
+    if (bignum_cmp(m1, m2_mod_p) >= 0) {
+        bignum_sub(h, m1, m2_mod_p);
+    } else {
+        // m1 < m2_mod_p, so add p to m1 first to avoid negative result
+        bignum_add(temp, m1, key->p);
+        bignum_sub(h, temp, m2_mod_p);
+    }
+    
+    asm_rsa_bignum_free(m2_mod_p);
     
     ret = bignum_mul_mod(h, h, key->qinv, key->p);
     if (ret != RSA_SUCCESS) goto cleanup;
