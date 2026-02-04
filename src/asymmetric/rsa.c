@@ -12,7 +12,7 @@
 
 // Helper function to generate random bytes
 int random_bytes(uint8_t *buf, size_t len) {
-    static int seeded = 0;  // Added static keyword
+    static int seeded = 0;
     if (!seeded) {
         srand(time(NULL));
         seeded = 1;
@@ -97,12 +97,6 @@ void bignum_shift_left(asm_rsa_bignum_t *result,
 /**
  * @brief Efficient binary long division
  * Computes quotient and remainder: dividend = divisor * quotient + remainder
- * 
- * @param quotient Output quotient (can be NULL if not needed)
- * @param remainder Output remainder  
- * @param dividend Input dividend
- * @param divisor Input divisor
- * @return RSA_SUCCESS on success, negative on failure
  */
 int bignum_div(asm_rsa_bignum_t *quotient,
                       asm_rsa_bignum_t *remainder,
@@ -252,9 +246,6 @@ void asm_rsa_ctx_free(asm_rsa_ctx_t *ctx) {
     }
 }
 
-/**
- * @brief Set decryption mode for the context
- */
 int asm_rsa_set_decrypt_mode(asm_rsa_ctx_t *ctx, RSA_DECRYPT_MODE mode) {
     if (!ctx) {
         return RSA_ERR_INVALID_PARAM;
@@ -268,9 +259,6 @@ int asm_rsa_set_decrypt_mode(asm_rsa_ctx_t *ctx, RSA_DECRYPT_MODE mode) {
     return RSA_SUCCESS;
 }
 
-/**
- * @brief Get current decryption mode
- */
 RSA_DECRYPT_MODE asm_rsa_get_decrypt_mode(const asm_rsa_ctx_t *ctx) {
     if (!ctx) {
         return RSA_DECRYPT_STANDARD;
@@ -354,12 +342,9 @@ int asm_rsa_bignum_to_bytes(const asm_rsa_bignum_t *bn, uint8_t *data, size_t le
     }
     return len;
 }
+
 // BIGNUM ARITHMETIC OPERATIONS
 
-/**
- * @brief Compare two bignums
- * @return 1 if a > b, -1 if a < b, 0 if equal
- */
 int bignum_cmp(const asm_rsa_bignum_t *a, const asm_rsa_bignum_t *b) {
     if (a->used > b->used) return 1;
     if (a->used < b->used) return -1;
@@ -371,9 +356,6 @@ int bignum_cmp(const asm_rsa_bignum_t *a, const asm_rsa_bignum_t *b) {
     return 0;
 }
 
-/**
- * @brief Copy bignum
- */
 void bignum_copy(asm_rsa_bignum_t *dst, const asm_rsa_bignum_t *src) {
     if (dst->size < src->used) return;
     
@@ -386,18 +368,12 @@ void bignum_copy(asm_rsa_bignum_t *dst, const asm_rsa_bignum_t *src) {
     }
 }
 
-/**
- * @brief Trim leading zeros from bignum
- */
 void bignum_trim(asm_rsa_bignum_t *bn) {
     while (bn->used > 0 && bn->data[bn->used - 1] == 0) {
         bn->used--;
     }
 }
 
-/**
- * @brief Add two bignums: result = a + b
- */
 int bignum_add(asm_rsa_bignum_t *result, 
                       const asm_rsa_bignum_t *a,
                       const asm_rsa_bignum_t *b) {
@@ -421,9 +397,6 @@ int bignum_add(asm_rsa_bignum_t *result,
     return RSA_SUCCESS;
 }
 
-/**
- * @brief Subtract two bignums: result = a - b (assumes a >= b)
- */
 int bignum_sub(asm_rsa_bignum_t *result,
                       const asm_rsa_bignum_t *a,
                       const asm_rsa_bignum_t *b) {
@@ -451,9 +424,6 @@ int bignum_sub(asm_rsa_bignum_t *result,
     return RSA_SUCCESS;
 }
 
-/**
- * @brief Multiply two bignums: result = a * b
- */
 int bignum_mul(asm_rsa_bignum_t *result,
                       const asm_rsa_bignum_t *a,
                       const asm_rsa_bignum_t *b) {
@@ -483,10 +453,6 @@ int bignum_mul(asm_rsa_bignum_t *result,
     return RSA_SUCCESS;
 }
 
-/**
- * @brief Modular reduction: result = a mod m
- * OPTIMIZED: Uses binary long division instead of repeated subtraction
- */
 int bignum_mod(asm_rsa_bignum_t *result,
                       const asm_rsa_bignum_t *a,
                       const asm_rsa_bignum_t *m) {
@@ -497,15 +463,13 @@ int bignum_mod(asm_rsa_bignum_t *result,
         return RSA_SUCCESS;
     }
     
-    // Special case: if m is small enough, use simple repeated subtraction
-    // This is safe because we're only iterating a bounded number of times
+    // Special case optimization for small m
     if (m->used == 1 && a->used <= 2) {
         asm_rsa_bignum_t *temp = asm_rsa_bignum_new(a->used + 1);
         if (!temp) return RSA_ERR_MEMORY;
         
         bignum_copy(temp, a);
         
-        // Safe: at most ~2^64 / m iterations, with safety counter
         int safety_counter = 0;
         while (bignum_cmp(temp, m) >= 0 && safety_counter++ < 1000000) {
             bignum_sub(temp, temp, m);
@@ -516,13 +480,12 @@ int bignum_mod(asm_rsa_bignum_t *result,
         return RSA_SUCCESS;
     }
     
-    // For large numbers, use binary long division (much faster!)
+    // For large numbers, use binary long division
     asm_rsa_bignum_t *remainder = asm_rsa_bignum_new(a->used + 1);
     if (!remainder) return RSA_ERR_MEMORY;
     
     bignum_copy(remainder, a);
     
-    // Count significant bits in a and m
     int a_bits = (a->used - 1) * 32;
     for (int i = 31; i >= 0; i--) {
         if (a->data[a->used - 1] & (1U << i)) {
@@ -539,46 +502,15 @@ int bignum_mod(asm_rsa_bignum_t *result,
         }
     }
     
-    // Perform long division by repeatedly subtracting shifted versions of m
     for (int bit_pos = a_bits - m_bits; bit_pos >= 0; bit_pos--) {
-        // Create (m << bit_pos)
         asm_rsa_bignum_t *shifted_m = asm_rsa_bignum_new(m->used + (bit_pos / 32) + 2);
         if (!shifted_m) {
             asm_rsa_bignum_free(remainder);
             return RSA_ERR_MEMORY;
         }
         
-        // Shift m left by bit_pos bits
-        int word_shift = bit_pos / 32;
-        int bit_shift = bit_pos % 32;
+        bignum_shift_left(shifted_m, m, bit_pos);
         
-        memset(shifted_m->data, 0, shifted_m->size * sizeof(uint32_t));
-        
-        if (bit_shift == 0) {
-            // Word-aligned shift (fast path)
-            for (size_t i = 0; i < m->used; i++) {
-                shifted_m->data[i + word_shift] = m->data[i];
-            }
-            shifted_m->used = m->used + word_shift;
-        } else {
-            // Bit shift within words
-            uint32_t carry = 0;
-            for (size_t i = 0; i < m->used; i++) {
-                uint64_t val = ((uint64_t)m->data[i] << bit_shift) | carry;
-                shifted_m->data[i + word_shift] = (uint32_t)(val & 0xFFFFFFFF);
-                carry = (uint32_t)(val >> 32);
-            }
-            if (carry) {
-                shifted_m->data[m->used + word_shift] = carry;
-                shifted_m->used = m->used + word_shift + 1;
-            } else {
-                shifted_m->used = m->used + word_shift;
-            }
-        }
-        
-        bignum_trim(shifted_m);
-        
-        // If remainder >= shifted_m, subtract it
         if (bignum_cmp(remainder, shifted_m) >= 0) {
             bignum_sub(remainder, remainder, shifted_m);
         }
@@ -592,9 +524,6 @@ int bignum_mod(asm_rsa_bignum_t *result,
     return RSA_SUCCESS;
 }
 
-/**
- * @brief Modular multiplication: result = (a * b) mod m
- */
 int bignum_mul_mod(asm_rsa_bignum_t *result,
                           const asm_rsa_bignum_t *a,
                           const asm_rsa_bignum_t *b,
@@ -614,49 +543,38 @@ int bignum_mul_mod(asm_rsa_bignum_t *result,
     return ret;
 }
 
-/**
- * @brief Modular exponentiation: result = (base^exp) mod m
- * 
- * Uses binary exponentiation (square-and-multiply) algorithm.
- */
 int bignum_mod_exp(asm_rsa_bignum_t *result, 
                           const asm_rsa_bignum_t *base,
                           const asm_rsa_bignum_t *exp,
                           const asm_rsa_bignum_t *mod) {
     if (!result || !base || !exp || !mod) return RSA_ERR_INVALID_PARAM;
     
-    // Check for zero modulus
     if (mod->used == 1 && mod->data[0] == 0) {
         return RSA_ERR_INVALID_PARAM;
     }
     
-    // Allocate temporary bignums
     asm_rsa_bignum_t *temp_base = asm_rsa_bignum_new(mod->used * 2 + 1);
     asm_rsa_bignum_t *temp_result = asm_rsa_bignum_new(mod->used * 2 + 1);
     asm_rsa_bignum_t *temp_mul = asm_rsa_bignum_new(mod->used * 2 + 1);
     
-    if (!temp_base || !temp_result) {
+    if (!temp_base || !temp_result || !temp_mul) {
         asm_rsa_bignum_free(temp_base);
         asm_rsa_bignum_free(temp_result);
         asm_rsa_bignum_free(temp_mul);
         return RSA_ERR_MEMORY;
     }
     
-    // Initialize result to 1
     memset(temp_result->data, 0, temp_result->size * sizeof(uint32_t));
     temp_result->data[0] = 1;
     temp_result->used = 1;
     
-    // Copy base and reduce it modulo m
     bignum_copy(temp_base, base);
     bignum_mod(temp_base, temp_base, mod);
     
-    // Binary exponentiation
     for (size_t i = 0; i < exp->used; i++) {
         uint32_t exp_word = exp->data[i];
         
         for (int bit = 0; bit < 32; bit++) {
-            // If current bit is 1: result = (result * base) mod m
             if (exp_word & 1) {
                 int ret = bignum_mul_mod(temp_mul, temp_result, temp_base, mod);
                 if (ret != RSA_SUCCESS) {
@@ -668,7 +586,6 @@ int bignum_mod_exp(asm_rsa_bignum_t *result,
                 bignum_copy(temp_result, temp_mul);
             }
             
-            // base = (base * base) mod m
             int ret = bignum_mul_mod(temp_mul, temp_base, temp_base, mod);
             if (ret != RSA_SUCCESS) {
                 asm_rsa_bignum_free(temp_base);
@@ -680,15 +597,12 @@ int bignum_mod_exp(asm_rsa_bignum_t *result,
             
             exp_word >>= 1;
             
-            // Early exit if remaining bits are zero
             if (i == exp->used - 1 && exp_word == 0) break;
         }
     }
     
-    // Copy result
     bignum_copy(result, temp_result);
     
-    // Clean up
     asm_rsa_bignum_free(temp_base);
     asm_rsa_bignum_free(temp_result);
     asm_rsa_bignum_free(temp_mul);
@@ -697,157 +611,99 @@ int bignum_mod_exp(asm_rsa_bignum_t *result,
 }
 
 /**
- * @brief Extended Euclidean Algorithm
- * Computes gcd(a,b) and coefficients x,y such that ax + by = gcd(a,b)
- */
-int extended_gcd(asm_rsa_bignum_t *gcd,
-                        asm_rsa_bignum_t *x,
-                        asm_rsa_bignum_t *y,
-                        const asm_rsa_bignum_t *a,
-                        const asm_rsa_bignum_t *b) {
-    if (!gcd || !x || !y || !a || !b) return RSA_ERR_INVALID_PARAM;
-    
-    size_t max_size = (a->used > b->used) ? a->used : b->used;
-    max_size = (max_size > gcd->size) ? gcd->size : max_size;
-    
-    asm_rsa_bignum_t *old_r = asm_rsa_bignum_new(max_size + 1);
-    asm_rsa_bignum_t *r = asm_rsa_bignum_new(max_size + 1);
-    asm_rsa_bignum_t *old_s = asm_rsa_bignum_new(max_size + 1);
-    asm_rsa_bignum_t *s = asm_rsa_bignum_new(max_size + 1);
-    asm_rsa_bignum_t *old_t = asm_rsa_bignum_new(max_size + 1);
-    asm_rsa_bignum_t *t = asm_rsa_bignum_new(max_size + 1);
-    asm_rsa_bignum_t *quotient = asm_rsa_bignum_new(max_size + 1);
-    asm_rsa_bignum_t *temp = asm_rsa_bignum_new(max_size * 2 + 2);
-    asm_rsa_bignum_t *temp2 = asm_rsa_bignum_new(max_size * 2 + 2);
-    
-    if (!old_r || !r || !old_s || !s || !old_t || !t || !quotient || !temp || !temp2) {
-        asm_rsa_bignum_free(old_r); asm_rsa_bignum_free(r);
-        asm_rsa_bignum_free(old_s); asm_rsa_bignum_free(s);
-        asm_rsa_bignum_free(old_t); asm_rsa_bignum_free(t);
-        asm_rsa_bignum_free(quotient); asm_rsa_bignum_free(temp);
-        asm_rsa_bignum_free(temp2);
-        return RSA_ERR_MEMORY;
-    }
-    
-    bignum_copy(old_r, a);
-    bignum_copy(r, b);
-    
-    old_s->data[0] = 1; old_s->used = 1;
-    s->data[0] = 0; s->used = 1;
-    old_t->data[0] = 0; old_t->used = 1;
-    t->data[0] = 1; t->used = 1;
-    
-    while (!(r->used == 1 && r->data[0] == 0)) {
-        // Use efficient division instead of repeated subtraction
-        int ret = bignum_div(quotient, temp, old_r, r);
-        if (ret != RSA_SUCCESS) {
-            asm_rsa_bignum_free(old_r); asm_rsa_bignum_free(r);
-            asm_rsa_bignum_free(old_s); asm_rsa_bignum_free(s);
-            asm_rsa_bignum_free(old_t); asm_rsa_bignum_free(t);
-            asm_rsa_bignum_free(quotient); asm_rsa_bignum_free(temp);
-            asm_rsa_bignum_free(temp2);
-            return ret;
-        }
-        
-        // Now temp = old_r mod r (remainder from bignum_div)
-        
-        // Update: (old_r, r) = (r, old_r mod r)
-        asm_rsa_bignum_t *new_r = temp;
-        bignum_copy(old_r, r);
-        bignum_copy(r, new_r);
-        
-        // Update: (old_s, s) = (s, old_s - quotient * s)
-        bignum_mul(temp2, quotient, s);
-        if (bignum_cmp(old_s, temp2) >= 0) {
-            bignum_sub(temp, old_s, temp2);
-        } else {
-            memset(temp->data, 0, temp->size * sizeof(uint32_t));
-            temp->used = 1;
-        }
-        bignum_copy(old_s, s);
-        bignum_copy(s, temp);
-        
-        // Update: (old_t, t) = (t, old_t - quotient * t)
-        bignum_mul(temp2, quotient, t);
-        if (bignum_cmp(old_t, temp2) >= 0) {
-            bignum_sub(temp, old_t, temp2);
-        } else {
-            memset(temp->data, 0, temp->size * sizeof(uint32_t));
-            temp->used = 1;
-        }
-        bignum_copy(old_t, t);
-        bignum_copy(t, temp);
-    }
-    
-    bignum_copy(gcd, old_r);
-    bignum_copy(x, old_s);
-    bignum_copy(y, old_t);
-    
-    asm_rsa_bignum_free(old_r); asm_rsa_bignum_free(r);
-    asm_rsa_bignum_free(old_s); asm_rsa_bignum_free(s);
-    asm_rsa_bignum_free(old_t); asm_rsa_bignum_free(t);
-    asm_rsa_bignum_free(quotient); asm_rsa_bignum_free(temp);
-    asm_rsa_bignum_free(temp2);
-    
-    return RSA_SUCCESS;
-}
-
-/**
  * @brief Compute modular inverse: result = a^(-1) mod m
+ * @note Replaces standard Extended Euclidean Algorithm with a version 
+ * tailored for unsigned arithmetic to avoid negative coefficients.
  */
 int bignum_mod_inverse(asm_rsa_bignum_t *result,
                               const asm_rsa_bignum_t *a,
                               const asm_rsa_bignum_t *m) {
     if (!result || !a || !m) return RSA_ERR_INVALID_PARAM;
-    
-    size_t max_size = (a->used > m->used) ? a->used : m->used;
-    
-    asm_rsa_bignum_t *gcd = asm_rsa_bignum_new(max_size + 1);
-    asm_rsa_bignum_t *x = asm_rsa_bignum_new(max_size * 2 + 2);
-    asm_rsa_bignum_t *y = asm_rsa_bignum_new(max_size * 2 + 2);
-    
-    if (!gcd || !x || !y) {
-        asm_rsa_bignum_free(gcd);
-        asm_rsa_bignum_free(x);
-        asm_rsa_bignum_free(y);
+
+    size_t max_size = (m->used > a->used ? m->used : a->used) + 2;
+
+    asm_rsa_bignum_t *r0 = asm_rsa_bignum_new(max_size);
+    asm_rsa_bignum_t *r1 = asm_rsa_bignum_new(max_size);
+    asm_rsa_bignum_t *x0 = asm_rsa_bignum_new(max_size);
+    asm_rsa_bignum_t *x1 = asm_rsa_bignum_new(max_size);
+    asm_rsa_bignum_t *quotient = asm_rsa_bignum_new(max_size);
+    asm_rsa_bignum_t *remainder = asm_rsa_bignum_new(max_size);
+    asm_rsa_bignum_t *term = asm_rsa_bignum_new(max_size * 2);
+    asm_rsa_bignum_t *new_x = asm_rsa_bignum_new(max_size);
+    asm_rsa_bignum_t *one = asm_rsa_bignum_new(1);
+
+    if (!r0 || !r1 || !x0 || !x1 || !quotient || !remainder || !term || !new_x || !one) {
+        asm_rsa_bignum_free(r0); asm_rsa_bignum_free(r1);
+        asm_rsa_bignum_free(x0); asm_rsa_bignum_free(x1);
+        asm_rsa_bignum_free(quotient); asm_rsa_bignum_free(remainder);
+        asm_rsa_bignum_free(term); asm_rsa_bignum_free(new_x);
+        asm_rsa_bignum_free(one);
         return RSA_ERR_MEMORY;
     }
-    
-    int ret = extended_gcd(gcd, x, y, a, m);
-    if (ret != RSA_SUCCESS) {
-        asm_rsa_bignum_free(gcd);
-        asm_rsa_bignum_free(x);
-        asm_rsa_bignum_free(y);
-        return ret;
+
+    // Initialize: r0 = m, r1 = a % m
+    bignum_copy(r0, m);
+    bignum_mod(r1, a, m);
+
+    // Initialize x: x0 = 0, x1 = 1
+    x0->data[0] = 0; x0->used = 1;
+    x1->data[0] = 1; x1->used = 1;
+
+    one->data[0] = 1; one->used = 1;
+
+    int ret = RSA_SUCCESS;
+
+    // Loop while r1 > 1
+    while (bignum_cmp(r1, one) > 0) {
+        // quotient = r0 / r1, remainder = r0 % r1
+        ret = bignum_div(quotient, remainder, r0, r1);
+        if (ret != RSA_SUCCESS) break;
+
+        // r0 = r1, r1 = remainder
+        bignum_copy(r0, r1);
+        bignum_copy(r1, remainder);
+
+        // Calculate x_new = x0 - quotient * x1 (mod m)
+        // Since we are unsigned, we compute:
+        // term = (quotient * x1) % m
+        ret = bignum_mul_mod(term, quotient, x1, m);
+        if (ret != RSA_SUCCESS) break;
+
+        if (bignum_cmp(x0, term) >= 0) {
+            // positive result directly
+            bignum_sub(new_x, x0, term);
+        } else {
+            // negative result, add modulus: new_x = m - (term - x0)
+            bignum_sub(term, term, x0); // reuse term for (term - x0)
+            bignum_sub(new_x, m, term);
+        }
+
+        // x0 = x1, x1 = new_x
+        bignum_copy(x0, x1);
+        bignum_copy(x1, new_x);
     }
-    
-    // Check if gcd == 1 (inverse exists)
-    if (gcd->used != 1 || gcd->data[0] != 1) {
-        asm_rsa_bignum_free(gcd);
-        asm_rsa_bignum_free(x);
-        asm_rsa_bignum_free(y);
-        return RSA_ERR_INVALID_PARAM;
+
+    if (ret == RSA_SUCCESS) {
+        // If r1 == 1, then x1 is the inverse
+        if (r1->used == 1 && r1->data[0] == 1) {
+            bignum_copy(result, x1);
+        } else {
+            ret = RSA_ERR_KEY_GENERATION_FAILED; // Inverse does not exist
+        }
     }
-    
-    // x might be negative, so compute x mod m
-    bignum_mod(result, x, m);
-    
-    asm_rsa_bignum_free(gcd);
-    asm_rsa_bignum_free(x);
-    asm_rsa_bignum_free(y);
-    
-    return RSA_SUCCESS;
+
+    asm_rsa_bignum_free(r0); asm_rsa_bignum_free(r1);
+    asm_rsa_bignum_free(x0); asm_rsa_bignum_free(x1);
+    asm_rsa_bignum_free(quotient); asm_rsa_bignum_free(remainder);
+    asm_rsa_bignum_free(term); asm_rsa_bignum_free(new_x);
+    asm_rsa_bignum_free(one);
+
+    return ret;
 }
 
 // PRIME NUMBER GENERATION
 
-/**
- * @brief Check if number is divisible by small primes (trial division)
- * @param n Number to test
- * @return 1 if possibly prime (passed trial division), 0 if definitely composite
- */
 int trial_division(const asm_rsa_bignum_t *n) {
-    // First 100 primes - eliminates ~77% of composite numbers quickly
     const uint32_t small_primes[] = {
         2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
         73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151,
@@ -860,21 +716,17 @@ int trial_division(const asm_rsa_bignum_t *n) {
     
     const size_t num_primes = sizeof(small_primes) / sizeof(small_primes[0]);
     
-    // Special case: check if n is 0 or 1
     if (n->used == 0 || (n->used == 1 && n->data[0] <= 1)) {
         return 0;
     }
     
-    // Check each small prime
     for (size_t i = 0; i < num_primes; i++) {
         uint32_t prime = small_primes[i];
         
-        // If n equals this small prime, it's prime
         if (n->used == 1 && n->data[0] == prime) {
             return 1;
         }
         
-        // Check if n % prime == 0 using long division
         uint64_t remainder = 0;
         for (int j = n->used - 1; j >= 0; j--) {
             remainder = (remainder << 32) | n->data[j];
@@ -882,24 +734,16 @@ int trial_division(const asm_rsa_bignum_t *n) {
         }
         
         if (remainder == 0) {
-            return 0; // Divisible by this prime, definitely composite
+            return 0;
         }
     }
     
-    return 1; // Passed all trial divisions, might be prime
+    return 1;
 }
 
-
-/**
- * @brief Miller-Rabin primality test
- * @param n Number to test for primality
- * @param rounds Number of test rounds (more rounds = higher confidence)
- * @return 1 if probably prime, 0 if composite
- */
 int miller_rabin(const asm_rsa_bignum_t *n, int rounds) {
     if (!n) return 0;
     
-    // Handle small cases
     if (n->used == 1) {
         uint32_t val = n->data[0];
         if (val < 2) return 0;
@@ -907,10 +751,8 @@ int miller_rabin(const asm_rsa_bignum_t *n, int rounds) {
         if (val % 2 == 0) return 0;
     }
     
-    // Check if even
     if ((n->data[0] & 1) == 0) return 0;
     
-    // Write n-1 as 2^r * d
     asm_rsa_bignum_t *n_minus_1 = asm_rsa_bignum_new(n->size);
     asm_rsa_bignum_t *one = asm_rsa_bignum_new(2);
     asm_rsa_bignum_t *d = asm_rsa_bignum_new(n->size);
@@ -930,7 +772,6 @@ int miller_rabin(const asm_rsa_bignum_t *n, int rounds) {
     
     int r = 0;
     while ((d->data[0] & 1) == 0) {
-        // d = d / 2
         uint64_t carry = 0;
         for (int i = d->used - 1; i >= 0; i--) {
             uint64_t val = ((uint64_t)carry << 32) | d->data[i];
@@ -941,9 +782,7 @@ int miller_rabin(const asm_rsa_bignum_t *n, int rounds) {
         r++;
     }
     
-    // Perform rounds of Miller-Rabin
     for (int round = 0; round < rounds; round++) {
-        // Generate random a in [2, n-2]
         asm_rsa_bignum_t *a = asm_rsa_bignum_new(n->size);
         if (!a) break;
         
@@ -957,14 +796,12 @@ int miller_rabin(const asm_rsa_bignum_t *n, int rounds) {
         asm_rsa_bignum_from_bytes(a, rand_bytes, n->used * 4);
         free(rand_bytes);
         
-        // Ensure a is in range [2, n-2]
         bignum_mod(a, a, n);
         if (bignum_cmp(a, one) <= 0) {
             a->data[0] = 2;
             a->used = 1;
         }
         
-        // x = a^d mod n
         asm_rsa_bignum_t *x = asm_rsa_bignum_new(n->size * 2);
         if (!x) {
             asm_rsa_bignum_free(a);
@@ -973,7 +810,6 @@ int miller_rabin(const asm_rsa_bignum_t *n, int rounds) {
         
         bignum_mod_exp(x, a, d, n);
         
-        // Check if x == 1 or x == n-1
         if (bignum_cmp(x, one) == 0 || bignum_cmp(x, n_minus_1) == 0) {
             asm_rsa_bignum_free(a);
             asm_rsa_bignum_free(x);
@@ -982,7 +818,6 @@ int miller_rabin(const asm_rsa_bignum_t *n, int rounds) {
         
         int is_prime = 0;
         for (int i = 0; i < r - 1; i++) {
-            // x = x^2 mod n
             bignum_mul_mod(x, x, x, n);
             
             if (bignum_cmp(x, n_minus_1) == 0) {
@@ -1009,9 +844,6 @@ int miller_rabin(const asm_rsa_bignum_t *n, int rounds) {
     return 1; // Probably prime
 }
 
-/**
- * @brief Generate a random prime number of specified bit length
- */
 int generate_prime(asm_rsa_bignum_t *prime, size_t bits) {
     if (!prime) return RSA_ERR_INVALID_PARAM;
     
@@ -1019,37 +851,22 @@ int generate_prime(asm_rsa_bignum_t *prime, size_t bits) {
     uint8_t *rand_bytes = malloc(bytes);
     if (!rand_bytes) return RSA_ERR_MEMORY;
     
-    int max_attempts = 10000;  // Increased from 1000
+    int max_attempts = 10000;
     int attempts = 0;
-    int trial_division_passes = 0;
-    int miller_rabin_tests = 0;
     
     while (attempts < max_attempts) {
-        // Generate random bytes
         random_bytes(rand_bytes, bytes);
-        
-        // Set MSB to ensure number is large enough
         rand_bytes[0] |= 0x80;
-        
-        // Set LSB to ensure number is odd
         rand_bytes[bytes - 1] |= 0x01;
         
-        // Convert to bignum
         asm_rsa_bignum_from_bytes(prime, rand_bytes, bytes);
         
-        // OPTIMIZATION: Trial division first (very fast, eliminates ~77% of composites)
         if (!trial_division(prime)) {
             attempts++;
-            continue;  // Failed trial division, try next candidate
+            continue;
         }
         
-        trial_division_passes++;
-        
-        // Only run expensive Miller-Rabin if passed trial division
-        miller_rabin_tests++;
-        if (miller_rabin(prime, 5)) {  // Reduced from 10 to 5 for faster testing
-            printf("    Found prime after %d attempts (%d passed trial division, %d Miller-Rabin tests)\n",
-                   attempts, trial_division_passes, miller_rabin_tests);
+        if (miller_rabin(prime, 5)) {
             free(rand_bytes);
             return RSA_SUCCESS;
         }
@@ -1057,7 +874,6 @@ int generate_prime(asm_rsa_bignum_t *prime, size_t bits) {
         attempts++;
     }
     
-    printf("    Failed to find prime after %d attempts\n", attempts);
     free(rand_bytes);
     return RSA_ERR_KEY_GENERATION_FAILED;
 }
@@ -1098,11 +914,12 @@ asm_rsa_pvt_key_t *asm_rsa_pvt_key_new(size_t key_size) {
     
     pvt_key->n = asm_rsa_bignum_new(words);
     pvt_key->d = asm_rsa_bignum_new(words);
-    pvt_key->p = asm_rsa_bignum_new(words / 2);
-    pvt_key->q = asm_rsa_bignum_new(words / 2);
-    pvt_key->dp = asm_rsa_bignum_new(words / 2);
-    pvt_key->dq = asm_rsa_bignum_new(words / 2);
-    pvt_key->qinv = asm_rsa_bignum_new(words / 2);
+    pvt_key->p = asm_rsa_bignum_new(words / 2 + 1);
+    pvt_key->q = asm_rsa_bignum_new(words / 2 + 1);
+    // Allocate CRT parameters with full size to handle intermediate calculations
+    pvt_key->dp = asm_rsa_bignum_new(words);
+    pvt_key->dq = asm_rsa_bignum_new(words);
+    pvt_key->qinv = asm_rsa_bignum_new(words);
     
     if (!pvt_key->n || !pvt_key->d || !pvt_key->p || !pvt_key->q ||
         !pvt_key->dp || !pvt_key->dq || !pvt_key->qinv) {
@@ -1129,17 +946,6 @@ void asm_rsa_pvt_key_free(asm_rsa_pvt_key_t *pvt_key) {
 
 // RSA KEY GENERATION
 
-/**
- * @brief Generate proper RSA key pair with correct mathematical relationships
- * 
- * This implementation:
- * 1. Generates two distinct primes p and q
- * 2. Computes n = p * q
- * 3. Computes φ(n) = (p-1)(q-1)
- * 4. Uses e = 65537
- * 5. Computes d = e^(-1) mod φ(n)
- * 6. Computes CRT parameters for optimization
- */
 int asm_rsa_generate_keypair(asm_rsa_ctx_t *ctx, size_t key_size) {
     if (!ctx) return RSA_ERR_INVALID_PARAM;
     
@@ -1148,13 +954,9 @@ int asm_rsa_generate_keypair(asm_rsa_ctx_t *ctx, size_t key_size) {
         return RSA_ERR_INVALID_KEY_LENGTH;
     }
     
-    printf("Generating %zu-bit RSA key pair...\n", key_size);
-    
-    // Free existing keys
     if (ctx->pub_key) asm_rsa_pub_key_free(ctx->pub_key);
     if (ctx->pvt_key) asm_rsa_pvt_key_free(ctx->pvt_key);
     
-    // Allocate new keys
     ctx->pub_key = asm_rsa_pub_key_new(key_size);
     ctx->pvt_key = asm_rsa_pvt_key_new(key_size);
     
@@ -1163,93 +965,72 @@ int asm_rsa_generate_keypair(asm_rsa_ctx_t *ctx, size_t key_size) {
     }
     
     ctx->key_size = key_size;
-    
     size_t half_bits = key_size / 2;
     
-    // Step 1: Generate prime p
-    printf("  Generating prime p (%zu bits)...\n", half_bits);
     int ret = generate_prime(ctx->pvt_key->p, half_bits);
-    if (ret != RSA_SUCCESS) {
-        printf("  Failed to generate prime p\n");
-        return ret;
-    }
+    if (ret != RSA_SUCCESS) return ret;
     
-    // Step 2: Generate prime q (different from p)
-    printf("  Generating prime q (%zu bits)...\n", half_bits);
     int max_attempts = 10;
     for (int attempt = 0; attempt < max_attempts; attempt++) {
         ret = generate_prime(ctx->pvt_key->q, half_bits);
         if (ret != RSA_SUCCESS) continue;
         
-        // Ensure q != p
         if (bignum_cmp(ctx->pvt_key->p, ctx->pvt_key->q) != 0) {
             break;
         }
     }
     
     if (bignum_cmp(ctx->pvt_key->p, ctx->pvt_key->q) == 0) {
-        printf("  Failed to generate distinct prime q\n");
         return RSA_ERR_KEY_GENERATION_FAILED;
     }
     
-    // Step 3: Compute n = p * q
-    printf("  Computing n = p * q...\n");
     ret = bignum_mul(ctx->pub_key->n, ctx->pvt_key->p, ctx->pvt_key->q);
-    if (ret != RSA_SUCCESS) {
-        printf("  Failed to compute n\n");
-        return ret;
-    }
+    if (ret != RSA_SUCCESS) return ret;
     bignum_copy(ctx->pvt_key->n, ctx->pub_key->n);
     
-    // Step 4: Set e = 65537 (0x10001)
-    printf("  Setting e = 65537...\n");
     ctx->pub_key->e->data[0] = 0x10001;
     ctx->pub_key->e->used = 1;
     
-    // Step 5: Compute φ(n) = (p-1)(q-1)
-    printf("  Computing φ(n) = (p-1)(q-1)...\n");
     asm_rsa_bignum_t *one = asm_rsa_bignum_new(2);
     asm_rsa_bignum_t *p_minus_1 = asm_rsa_bignum_new(ctx->pvt_key->p->size);
     asm_rsa_bignum_t *q_minus_1 = asm_rsa_bignum_new(ctx->pvt_key->q->size);
     asm_rsa_bignum_t *phi = asm_rsa_bignum_new(ctx->pub_key->n->size * 2);
     
     if (!one || !p_minus_1 || !q_minus_1 || !phi) {
-        asm_rsa_bignum_free(one);
-        asm_rsa_bignum_free(p_minus_1);
-        asm_rsa_bignum_free(q_minus_1);
-        asm_rsa_bignum_free(phi);
+        asm_rsa_bignum_free(one); asm_rsa_bignum_free(p_minus_1);
+        asm_rsa_bignum_free(q_minus_1); asm_rsa_bignum_free(phi);
         return RSA_ERR_MEMORY;
     }
     
-    one->data[0] = 1;
-    one->used = 1;
+    one->data[0] = 1; one->used = 1;
     
     bignum_sub(p_minus_1, ctx->pvt_key->p, one);
     bignum_sub(q_minus_1, ctx->pvt_key->q, one);
     bignum_mul(phi, p_minus_1, q_minus_1);
     
-    // Step 6: Compute d = e^(-1) mod φ(n)
-    printf("  Computing d = e^(-1) mod φ(n)...\n");
     ret = bignum_mod_inverse(ctx->pvt_key->d, ctx->pub_key->e, phi);
     if (ret != RSA_SUCCESS) {
-        printf("  Failed to compute d\n");
-        asm_rsa_bignum_free(one);
-        asm_rsa_bignum_free(p_minus_1);
-        asm_rsa_bignum_free(q_minus_1);
-        asm_rsa_bignum_free(phi);
+        asm_rsa_bignum_free(one); asm_rsa_bignum_free(p_minus_1);
+        asm_rsa_bignum_free(q_minus_1); asm_rsa_bignum_free(phi);
         return ret;
     }
     
-    // Step 7: Compute CRT parameters
-    printf("  Computing CRT parameters...\n");
+    // Compute CRT parameters: dp = d mod (p-1), dq = d mod (q-1)
+    ret = bignum_mod(ctx->pvt_key->dp, ctx->pvt_key->d, p_minus_1);
+    if (ret != RSA_SUCCESS) {
+        asm_rsa_bignum_free(one); asm_rsa_bignum_free(p_minus_1);
+        asm_rsa_bignum_free(q_minus_1); asm_rsa_bignum_free(phi);
+        return ret;
+    }
     
-    // dp = d mod (p-1)
-    bignum_mod(ctx->pvt_key->dp, ctx->pvt_key->d, p_minus_1);
+    ret = bignum_mod(ctx->pvt_key->dq, ctx->pvt_key->d, q_minus_1);
+    if (ret != RSA_SUCCESS) {
+        asm_rsa_bignum_free(one); asm_rsa_bignum_free(p_minus_1);
+        asm_rsa_bignum_free(q_minus_1); asm_rsa_bignum_free(phi);
+        return ret;
+    }
     
-    // dq = d mod (q-1)
-    bignum_mod(ctx->pvt_key->dq, ctx->pvt_key->d, q_minus_1);
-    
-    // qinv = q^(-1) mod p
+    // Compute qinv = q^(-1) mod p
     ret = bignum_mod_inverse(ctx->pvt_key->qinv, ctx->pvt_key->q, ctx->pvt_key->p);
     
     asm_rsa_bignum_free(one);
@@ -1257,13 +1038,7 @@ int asm_rsa_generate_keypair(asm_rsa_ctx_t *ctx, size_t key_size) {
     asm_rsa_bignum_free(q_minus_1);
     asm_rsa_bignum_free(phi);
     
-    if (ret != RSA_SUCCESS) {
-        printf("  Failed to compute qinv\n");
-        return ret;
-    }
-    
-    printf("  Key generation complete!\n");
-    return RSA_SUCCESS;
+    return ret;
 }
 
 asm_rsa_pub_key_t *asm_rsa_get_pub_key(asm_rsa_ctx_t *ctx) {
@@ -1284,13 +1059,11 @@ int pkcs1_pad(const uint8_t *input, size_t input_len,
         return RSA_ERR_INVALID_DATA_LENGTH;
     }
     
-    // PKCS#1 v1.5 padding: 0x00 || 0x02 || PS || 0x00 || M
     output[0] = 0x00;
     output[1] = 0x02;
     
     size_t ps_len = output_len - input_len - 3;
     
-    // Generate non-zero random padding
     for (size_t i = 0; i < ps_len; i++) {
         do {
             random_bytes(&output[2 + i], 1);
@@ -1309,12 +1082,10 @@ int pkcs1_unpad(const uint8_t *input, size_t input_len,
         return RSA_ERR_INVALID_DATA_LENGTH;
     }
     
-    // Check PKCS#1 v1.5 format
     if (input[0] != 0x00 || input[1] != 0x02) {
         return RSA_ERR_DECRYPTION_FAILED;
     }
     
-    // Find the 0x00 separator
     size_t i = 2;
     while (i < input_len && input[i] != 0x00) {
         i++;
@@ -1324,7 +1095,7 @@ int pkcs1_unpad(const uint8_t *input, size_t input_len,
         return RSA_ERR_DECRYPTION_FAILED;
     }
     
-    i++; // Skip the 0x00
+    i++;
     size_t msg_len = input_len - i;
     
     if (msg_len > *output_len) {
@@ -1359,18 +1130,15 @@ int asm_rsa_encryption(const asm_rsa_pub_key_t *pub_key,
         return RSA_ERR_INVALID_DATA_LENGTH;
     }
     
-    // Allocate padded message buffer
     uint8_t *padded = malloc(key_bytes);
     if (!padded) return RSA_ERR_MEMORY;
     
-    // Apply PKCS#1 padding
     int ret = pkcs1_pad(plaintext, plaintext_len, padded, key_bytes);
     if (ret != RSA_SUCCESS) {
         free(padded);
         return ret;
     }
     
-    // Convert padded message to bignum
     asm_rsa_bignum_t *m = asm_rsa_bignum_new((key_bytes + 3) / 4);
     asm_rsa_bignum_t *c = asm_rsa_bignum_new((key_bytes + 3) / 4);
     
@@ -1383,7 +1151,6 @@ int asm_rsa_encryption(const asm_rsa_pub_key_t *pub_key,
     
     asm_rsa_bignum_from_bytes(m, padded, key_bytes);
     
-    // Perform RSA encryption: c = m^e mod n
     ret = bignum_mod_exp(c, m, pub_key->e, pub_key->n);
     
     if (ret == RSA_SUCCESS) {
@@ -1417,9 +1184,12 @@ int asm_rsa_decryption(const asm_rsa_pvt_key_t *pvt_key,
         return RSA_ERR_INVALID_DATA_LENGTH;
     }
     
-    // Convert ciphertext to bignum
     asm_rsa_bignum_t *c = asm_rsa_bignum_new((key_bytes + 3) / 4);
-    asm_rsa_bignum_t *m = asm_rsa_bignum_new((key_bytes + 3) / 4);
+    // Allocate m with enough space for CRT intermediate results
+    // CRT uses safe_size = p->size + q->size + 2, and p,q are allocated as (key_bytes/8 + 3)/4/2 + 1
+    // For proper allocation, we need: 2 * (words/2 + 1) + 2 = words + 4
+    size_t words = (key_bytes + 3) / 4;
+    asm_rsa_bignum_t *m = asm_rsa_bignum_new(words + 4);
     
     if (!c || !m) {
         asm_rsa_bignum_free(c);
@@ -1429,18 +1199,15 @@ int asm_rsa_decryption(const asm_rsa_pvt_key_t *pvt_key,
     
     asm_rsa_bignum_from_bytes(c, ciphertext, ciphertext_len);
     
-    // Choose decryption method based on mode parameter
     int ret;
 
     switch (mode) {
         case RSA_DECRYPT_CRT:
-            // CRT-optimized decryption (~4x faster)
             ret = rsa_decrypt_crt(m, c, pvt_key);
             break;
 
         case RSA_DECRYPT_STANDARD:
         default:
-            // Standard RSA decryption: m = c^d mod n
             ret = bignum_mod_exp(m, c, pvt_key->d, pvt_key->n);
             break;
     }
@@ -1455,28 +1222,7 @@ int asm_rsa_decryption(const asm_rsa_pvt_key_t *pvt_key,
         
         ret = asm_rsa_bignum_to_bytes(m, padded, key_bytes);
         
-        if (padded[0] != 0x00 || padded[1] != 0x02) {
-            ret = RSA_ERR_DECRYPTION_FAILED; // -5
-        } else {
-            // Find the 0x00 separator after the PS (padding string)
-            size_t i = 2;
-            while (i < key_bytes && padded[i] != 0x00) {
-                i++;
-            }
-
-            if (i >= key_bytes || i < 10) {
-                ret = RSA_ERR_DECRYPTION_FAILED;
-            } else {
-                i++; // Move past the 0x00 separator
-                size_t actual_len = key_bytes - i;
-                memcpy(plaintext, &padded[i], actual_len);
-                *plaintext_len = actual_len;
-                ret = RSA_SUCCESS;
-            }
-        }
-
         if (ret >= 0) {
-            // Remove PKCS#1 padding
             ret = pkcs1_unpad(padded, key_bytes, plaintext, plaintext_len);
         }
         
@@ -1489,36 +1235,21 @@ int asm_rsa_decryption(const asm_rsa_pvt_key_t *pvt_key,
     return ret;
 }
 
-/**
- * @brief RSA decryption using Chinese Remainder Theorem (CRT)
- * This is approximately 4x faster than standard decryption
- */
 int rsa_decrypt_crt(asm_rsa_bignum_t *m,
                           const asm_rsa_bignum_t *c,
                           const asm_rsa_pvt_key_t *key) {
     if (!m || !c || !key) return RSA_ERR_INVALID_PARAM;
     
-    // m1 = c^dp mod p
-    asm_rsa_bignum_t *m1 = asm_rsa_bignum_new(key->p->size * 2);
-    // m2 = c^dq mod q
-    asm_rsa_bignum_t *m2 = asm_rsa_bignum_new(key->q->size * 2);
-    // h = (m1 - m2) * qinv mod p
-    asm_rsa_bignum_t *h = asm_rsa_bignum_new(key->p->size * 2);
-    asm_rsa_bignum_t *temp = asm_rsa_bignum_new(key->p->size * 2);
+    // Allocate larger buffers to handle carries and intermediate results
+    size_t safe_size = key->p->size + key->q->size + 2;
+    asm_rsa_bignum_t *m1 = asm_rsa_bignum_new(safe_size);
+    asm_rsa_bignum_t *m2 = asm_rsa_bignum_new(safe_size);
+    asm_rsa_bignum_t *h = asm_rsa_bignum_new(safe_size);
+    asm_rsa_bignum_t *temp = asm_rsa_bignum_new(safe_size);
+    asm_rsa_bignum_t *c_mod_p = asm_rsa_bignum_new(key->p->size + 1);
+    asm_rsa_bignum_t *c_mod_q = asm_rsa_bignum_new(key->q->size + 1);
     
-    if (!m1 || !m2 || !h || !temp) {
-        asm_rsa_bignum_free(m1);
-        asm_rsa_bignum_free(m2);
-        asm_rsa_bignum_free(h);
-        asm_rsa_bignum_free(temp);
-        return RSA_ERR_MEMORY;
-    }
-    
-    // Reduce c modulo p and q
-    asm_rsa_bignum_t *c_mod_p = asm_rsa_bignum_new(key->p->size);
-    asm_rsa_bignum_t *c_mod_q = asm_rsa_bignum_new(key->q->size);
-    
-    if (!c_mod_p || !c_mod_q) {
+    if (!m1 || !m2 || !h || !temp || !c_mod_p || !c_mod_q) {
         asm_rsa_bignum_free(m1); asm_rsa_bignum_free(m2);
         asm_rsa_bignum_free(h); asm_rsa_bignum_free(temp);
         asm_rsa_bignum_free(c_mod_p); asm_rsa_bignum_free(c_mod_q);
@@ -1528,15 +1259,12 @@ int rsa_decrypt_crt(asm_rsa_bignum_t *m,
     bignum_mod(c_mod_p, c, key->p);
     bignum_mod(c_mod_q, c, key->q);
     
-    // m1 = c^dp mod p
     int ret = bignum_mod_exp(m1, c_mod_p, key->dp, key->p);
     if (ret != RSA_SUCCESS) goto cleanup;
     
-    // m2 = c^dq mod q
     ret = bignum_mod_exp(m2, c_mod_q, key->dq, key->q);
     if (ret != RSA_SUCCESS) goto cleanup;
     
-    // h = ((m1 - m2) mod p) * qinv mod p
     asm_rsa_bignum_t *m2_mod_p = asm_rsa_bignum_new(key->p->size + 1);
     if (!m2_mod_p) {
         ret = RSA_ERR_MEMORY;
@@ -1548,7 +1276,6 @@ int rsa_decrypt_crt(asm_rsa_bignum_t *m,
     if (bignum_cmp(m1, m2_mod_p) >= 0) {
         bignum_sub(h, m1, m2_mod_p);
     } else {
-        // m1 < m2_mod_p, so add p to m1 first to avoid negative result
         bignum_add(temp, m1, key->p);
         bignum_sub(h, temp, m2_mod_p);
     }
@@ -1558,34 +1285,21 @@ int rsa_decrypt_crt(asm_rsa_bignum_t *m,
     ret = bignum_mul_mod(h, h, key->qinv, key->p);
     if (ret != RSA_SUCCESS) goto cleanup;
     
-    // m = m2 + h * q
     ret = bignum_mul(temp, h, key->q);
     if (ret != RSA_SUCCESS) goto cleanup;
     
     ret = bignum_add(m, m2, temp);
     
 cleanup:
-    asm_rsa_bignum_free(m1);
-    asm_rsa_bignum_free(m2);
-    asm_rsa_bignum_free(h);
-    asm_rsa_bignum_free(temp);
-    asm_rsa_bignum_free(c_mod_p);
-    asm_rsa_bignum_free(c_mod_q);
+    asm_rsa_bignum_free(m1); asm_rsa_bignum_free(m2);
+    asm_rsa_bignum_free(h); asm_rsa_bignum_free(temp);
+    asm_rsa_bignum_free(c_mod_p); asm_rsa_bignum_free(c_mod_q);
     
     return ret;
 }
 
 // RSA SIGNATURES
 
-/**
- * @brief Sign a message using RSA private key
- * @param pvt_key Private key for signing
- * @param message Message to sign
- * @param message_len Length of message
- * @param signature Output buffer for signature
- * @param signature_len Pointer to signature length (input: buffer size, output: actual size)
- * @return RSA_SUCCESS on success, negative on failure
- */
 int asm_rsa_sign(const asm_rsa_pvt_key_t *pvt_key,
                  const uint8_t *message,
                  size_t message_len,
@@ -1610,18 +1324,20 @@ int asm_rsa_sign(const asm_rsa_pvt_key_t *pvt_key,
     uint8_t *padded = malloc(key_bytes);
     if (!padded) return RSA_ERR_MEMORY;
     
-    // PKCS#1 v1.5 padding for signatures (type 1)
     padded[0] = 0x00;
-    padded[1] = 0x01; // Type 1 for signatures
+    padded[1] = 0x01; 
     
     size_t ps_len = key_bytes - message_len - 3;
-    memset(&padded[2], 0xFF, ps_len); // Padding with 0xFF for signatures
+    memset(&padded[2], 0xFF, ps_len); 
     
     padded[2 + ps_len] = 0x00;
     memcpy(&padded[3 + ps_len], message, message_len);
     
     asm_rsa_bignum_t *m = asm_rsa_bignum_new((key_bytes + 3) / 4);
-    asm_rsa_bignum_t *s = asm_rsa_bignum_new((key_bytes + 3) / 4);
+    // Allocate s with enough space for CRT intermediate results  
+    // CRT uses safe_size = p->size + q->size + 2, same as decryption
+    size_t words = (key_bytes + 3) / 4;
+    asm_rsa_bignum_t *s = asm_rsa_bignum_new(words + 4);
     
     if (!m || !s) {
         free(padded);
@@ -1635,13 +1351,11 @@ int asm_rsa_sign(const asm_rsa_pvt_key_t *pvt_key,
     int ret;
     switch (mode) {
         case RSA_DECRYPT_CRT:
-            // CRT-optimized signing (~4x faster)
             ret = rsa_decrypt_crt(s, m, pvt_key);
             break;
 
         case RSA_DECRYPT_STANDARD:
         default:
-            // Standard RSA signing: s = m^d mod n
             ret = bignum_mod_exp(s, m, pvt_key->d, pvt_key->n);
             break;
     }
@@ -1661,15 +1375,6 @@ int asm_rsa_sign(const asm_rsa_pvt_key_t *pvt_key,
     return ret;
 }
 
-/**
- * @brief Verify a signature using RSA public key
- * @param pub_key Public key for verification
- * @param message Original message
- * @param message_len Length of message
- * @param signature Signature to verify
- * @param signature_len Length of signature
- * @return RSA_SUCCESS if signature is valid, negative otherwise
- */
 int asm_rsa_verify(const asm_rsa_pub_key_t *pub_key,
                    const uint8_t *message,
                    size_t message_len,
@@ -1696,7 +1401,6 @@ int asm_rsa_verify(const asm_rsa_pub_key_t *pub_key,
     
     asm_rsa_bignum_from_bytes(s, signature, signature_len);
     
-    // Verify: m = s^e mod n
     int ret = bignum_mod_exp(m, s, pub_key->e, pub_key->n);
     
     if (ret == RSA_SUCCESS) {
@@ -1710,11 +1414,9 @@ int asm_rsa_verify(const asm_rsa_pub_key_t *pub_key,
         ret = asm_rsa_bignum_to_bytes(m, padded, key_bytes);
         
         if (ret >= 0) {
-            // Verify PKCS#1 v1.5 padding type 1
             if (padded[0] != 0x00 || padded[1] != 0x01) {
                 ret = RSA_ERR_DECRYPTION_FAILED;
             } else {
-                // Find 0x00 separator
                 size_t i = 2;
                 while (i < key_bytes && padded[i] == 0xFF) {
                     i++;
@@ -1726,7 +1428,6 @@ int asm_rsa_verify(const asm_rsa_pub_key_t *pub_key,
                     i++;
                     size_t recovered_len = key_bytes - i;
                     
-                    // Compare recovered message with original
                     if (recovered_len != message_len ||
                         memcmp(&padded[i], message, message_len) != 0) {
                         ret = RSA_ERR_DECRYPTION_FAILED;
