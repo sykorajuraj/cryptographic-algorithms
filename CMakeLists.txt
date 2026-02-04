@@ -100,6 +100,29 @@ set(AES_HEADERS
     ${SRC_DIR}/symmetric/aes.h
 )
 
+# RSA Sources
+set(RSA_SOURCES
+    ${SRC_DIR}/asymmetric/rsa.c
+)
+
+set(RSA_HEADERS
+    ${SRC_DIR}/asymmetric/rsa.h
+)
+
+# PHF (Perfect Hash Function) Sources
+set(PHF_SOURCES
+    ${SRC_DIR}/hash/phf_api.c
+    ${SRC_DIR}/hash/phf_bdz.c
+    ${SRC_DIR}/hash/phf_chd.c
+    ${SRC_DIR}/hash/phf_elias_fano.c
+    ${SRC_DIR}/hash/phf_hash.c
+    ${SRC_DIR}/hash/phf_rank_select.c
+)
+
+set(PHF_HEADERS
+    ${SRC_DIR}/hash/phf.h
+)
+
 # ==============================================================================
 # AES Library
 # ==============================================================================
@@ -112,6 +135,35 @@ add_library(aes STATIC
 target_include_directories(aes PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# ==============================================================================
+# RSA Library
+# ==============================================================================
+
+add_library(rsa STATIC
+    ${RSA_SOURCES}
+    ${RSA_HEADERS}
+)
+
+target_include_directories(rsa PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# ==============================================================================
+# PHF Library
+# ==============================================================================
+
+add_library(phf STATIC
+    ${PHF_SOURCES}
+    ${PHF_HEADERS}
+)
+
+target_include_directories(phf PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Link math library for PHF (needed for sqrt, etc.)
+target_link_libraries(phf m)
 
 # ==============================================================================
 # Utils Library
@@ -140,6 +192,18 @@ if(BUILD_EXAMPLES)
         utils
     )
     
+    # PHF example (if exists)
+    if(EXISTS ${EXAMPLE_DIR}/example_phf.c)
+        add_executable(example_phf
+            ${EXAMPLE_DIR}/example_phf.c
+        )
+        
+        target_link_libraries(example_phf
+            phf
+            utils
+        )
+    endif()
+    
     message(STATUS "Examples will be built")
 endif()
 
@@ -167,6 +231,35 @@ if(BUILD_TESTS)
         
         add_test(NAME AESTests COMMAND test_aes)
         
+        # Add RSA test executable
+        add_executable(test_rsa
+            ${TEST_DIR}/test_rsa.cpp
+        )
+        
+        target_link_libraries(test_rsa
+            rsa
+            utils
+            GTest::gtest
+            GTest::gtest_main
+            pthread
+        )
+        
+        add_test(NAME RSATests COMMAND test_rsa)
+        
+        # Add PHF test executable
+        add_executable(test_phf
+            ${TEST_DIR}/test_phf.cpp
+        )
+        
+        target_link_libraries(test_phf
+            phf
+            GTest::gtest
+            GTest::gtest_main
+            pthread
+        )
+        
+        add_test(NAME PHFTests COMMAND test_phf)
+        
         message(STATUS "Tests will be built with Google Test")
     else()
         message(WARNING "Google Test not found. Tests will not be built.")
@@ -189,6 +282,18 @@ if(BUILD_BENCHMARKS)
         aes
     )
     
+    # PHF benchmark (if exists)
+    if(EXISTS ${BENCH_DIR}/bench_phf.c)
+        add_executable(bench_phf
+            ${BENCH_DIR}/bench_phf.c
+        )
+        
+        target_link_libraries(bench_phf
+            utils
+            phf
+        )
+    endif()
+    
     message(STATUS "Benchmarks will be built")
 endif()
 
@@ -210,9 +315,31 @@ endif()
 if(BUILD_TESTS AND GTest_FOUND)
     add_custom_target(run-tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-        DEPENDS test_aes
+        DEPENDS test_aes test_rsa test_phf
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Running unit tests..."
+    )
+    
+    # Add individual test targets
+    add_custom_target(run-test-aes
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -R AESTests
+        DEPENDS test_aes
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running AES tests..."
+    )
+    
+    add_custom_target(run-test-rsa
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -R RSATests
+        DEPENDS test_rsa
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running RSA tests..."
+    )
+    
+    add_custom_target(run-test-phf
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -R PHFTests
+        DEPENDS test_phf
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running PHF tests..."
     )
 endif()
 
@@ -232,7 +359,7 @@ if(BUILD_EXAMPLES AND BUILD_TESTS AND BUILD_BENCHMARKS AND GTest_FOUND)
         COMMAND example_aes
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
         COMMAND bench_aes
-        DEPENDS example_aes test_aes bench_aes
+        DEPENDS example_aes test_aes test_rsa test_phf bench_aes
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Running all examples, tests, and benchmarks..."
     )
@@ -268,9 +395,8 @@ if(BUILD_EXAMPLES)
 endif()
 
 if(BUILD_TESTS AND GTest_FOUND)
-    install(TARGETS test_aes
+    install(TARGETS test_aes test_rsa test_phf
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        RENAME aes-test
     )
 endif()
 
@@ -283,6 +409,14 @@ endif()
 
 # Install headers
 install(FILES ${AES_HEADERS}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/crypto
+)
+
+install(FILES ${RSA_HEADERS}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/crypto
+)
+
+install(FILES ${PHF_HEADERS}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/crypto
 )
 
@@ -313,6 +447,26 @@ if(VALGRIND AND BUILD_TESTS AND GTest_FOUND)
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Running memory leak detection with valgrind..."
     )
+    
+    add_custom_target(valgrind-rsa
+        COMMAND ${VALGRIND} --leak-check=full --show-leak-kinds=all 
+                --track-origins=yes --verbose 
+                --log-file=valgrind-rsa-out.txt 
+                $<TARGET_FILE:test_rsa>
+        DEPENDS test_rsa
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running memory leak detection on RSA tests with valgrind..."
+    )
+    
+    add_custom_target(valgrind-phf
+        COMMAND ${VALGRIND} --leak-check=full --show-leak-kinds=all 
+                --track-origins=yes --verbose 
+                --log-file=valgrind-phf-out.txt 
+                $<TARGET_FILE:test_phf>
+        DEPENDS test_phf
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running memory leak detection on PHF tests with valgrind..."
+    )
 endif()
 
 # Code formatting with clang-format
@@ -336,7 +490,7 @@ endif()
 find_program(CLANG_TIDY clang-tidy)
 if(CLANG_TIDY)
     add_custom_target(lint
-        COMMAND ${CLANG_TIDY} ${AES_SOURCES} -- -I${CMAKE_CURRENT_SOURCE_DIR}
+        COMMAND ${CLANG_TIDY} ${AES_SOURCES} ${RSA_SOURCES} ${PHF_SOURCES} -- -I${CMAKE_CURRENT_SOURCE_DIR}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Running linter with clang-tidy..."
     )
@@ -372,6 +526,11 @@ message(STATUS "Build options:")
 message(STATUS "  Examples:        ${BUILD_EXAMPLES}")
 message(STATUS "  Tests:           ${BUILD_TESTS}")
 message(STATUS "  Benchmarks:      ${BUILD_BENCHMARKS}")
+message(STATUS "")
+message(STATUS "Libraries:")
+message(STATUS "  AES:             YES")
+message(STATUS "  RSA:             YES")
+message(STATUS "  PHF:             YES")
 message(STATUS "")
 message(STATUS "Tools found:")
 if(GTest_FOUND)
