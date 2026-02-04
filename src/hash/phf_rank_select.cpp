@@ -1,11 +1,12 @@
 /**
- * @file src/hash/phf_rank_select.c
+ * @file phf_rank_select.cpp
  * @brief Rank and Select data structure for succinct compression
  */
 
 #include "phf.h"
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
 
 #define BLOCK_SIZE 64      /* log2(n) sized blocks */
 #define MINI_BLOCK_SIZE 8  /* Mini-blocks for fine-grained rank */
@@ -23,7 +24,7 @@ static inline uint32_t popcount64(uint64_t x) {
 }
 
 /* Count bits in a range */
-static uint32_t popcount_range(const uint64_t *bitmap, uint32_t start_bit, uint32_t end_bit) {
+static uint32_t popcount_range(const std::vector<uint64_t>& bitmap, uint32_t start_bit, uint32_t end_bit) {
     if (start_bit >= end_bit) return 0;
     
     uint32_t count = 0;
@@ -54,33 +55,30 @@ static uint32_t popcount_range(const uint64_t *bitmap, uint32_t start_bit, uint3
     return count;
 }
 
-int phf_rank_select_build(const uint64_t *bitmap, uint32_t bitmap_size, phf_rank_select_t *rs) {
-    if (!bitmap || !rs || bitmap_size == 0) return -1;
+int phf_rank_select_build(const uint64_t *bitmap_data, uint32_t bitmap_size, phf_rank_select_t *rs) {
+    if (!bitmap_data || !rs || bitmap_size == 0) return -1;
     
-    memset(rs, 0, sizeof(phf_rank_select_t));
+    rs->bitmap.clear();
+    rs->block_ranks.clear();
+    rs->mini_ranks.clear();
+    rs->select_samples.clear();
     
     rs->bitmap_size = bitmap_size;
     uint32_t num_words = (bitmap_size + 63) / 64;
     
     /* Copy bitmap */
-    rs->bitmap = malloc(num_words * sizeof(uint64_t));
-    if (!rs->bitmap) return -1;
-    memcpy(rs->bitmap, bitmap, num_words * sizeof(uint64_t));
+    rs->bitmap.assign(bitmap_data, bitmap_data + num_words);
     
     /* Count total number of 1s */
     rs->num_ones = 0;
     for (uint32_t i = 0; i < num_words; i++) {
-        rs->num_ones += popcount64(bitmap[i]);
+        rs->num_ones += popcount64(bitmap_data[i]);
     }
     
     /* Build block structure */
     rs->num_blocks = (bitmap_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     
-    rs->block_ranks = malloc((rs->num_blocks + 1) * sizeof(uint32_t));
-    if (!rs->block_ranks) {
-        free(rs->bitmap);
-        return -1;
-    }
+    rs->block_ranks.resize(rs->num_blocks + 1);
     
     /* Compute block ranks (prefix sums) */
     rs->block_ranks[0] = 0;
@@ -89,19 +87,14 @@ int phf_rank_select_build(const uint64_t *bitmap, uint32_t bitmap_size, phf_rank
         uint32_t block_end = (i + 1) * BLOCK_SIZE;
         if (block_end > bitmap_size) block_end = bitmap_size;
         
-        uint32_t block_ones = popcount_range(bitmap, block_start, block_end);
+        uint32_t block_ones = popcount_range(rs->bitmap, block_start, block_end);
         rs->block_ranks[i + 1] = rs->block_ranks[i] + block_ones;
     }
     
     /* Build mini-block structure */
     uint32_t num_mini_blocks = (bitmap_size + MINI_BLOCK_SIZE - 1) / MINI_BLOCK_SIZE;
     
-    rs->mini_ranks = malloc(num_mini_blocks * sizeof(uint16_t));
-    if (!rs->mini_ranks) {
-        free(rs->block_ranks);
-        free(rs->bitmap);
-        return -1;
-    }
+    rs->mini_ranks.resize(num_mini_blocks);
     
     /* Compute mini-block ranks */
     for (uint32_t i = 0; i < num_mini_blocks; i++) {
@@ -110,7 +103,7 @@ int phf_rank_select_build(const uint64_t *bitmap, uint32_t bitmap_size, phf_rank
         uint32_t mini_start = i * MINI_BLOCK_SIZE;
         
         if (mini_start > block_start) {
-            rs->mini_ranks[i] = popcount_range(bitmap, block_start, mini_start);
+            rs->mini_ranks[i] = popcount_range(rs->bitmap, block_start, mini_start);
         } else {
             rs->mini_ranks[i] = 0;
         }
@@ -121,13 +114,7 @@ int phf_rank_select_build(const uint64_t *bitmap, uint32_t bitmap_size, phf_rank
         uint32_t sample_interval = 64;  /* Sample every 64 ones */
         uint32_t num_samples = (rs->num_ones + sample_interval - 1) / sample_interval;
         
-        rs->select_samples = malloc(num_samples * sizeof(uint32_t));
-        if (!rs->select_samples) {
-            free(rs->mini_ranks);
-            free(rs->block_ranks);
-            free(rs->bitmap);
-            return -1;
-        }
+        rs->select_samples.resize(num_samples);
         
         uint32_t ones_count = 0;
         uint32_t sample_idx = 0;
@@ -136,7 +123,7 @@ int phf_rank_select_build(const uint64_t *bitmap, uint32_t bitmap_size, phf_rank
             uint32_t word_idx = i / 64;
             uint32_t bit_idx = i % 64;
             
-            if (bitmap[word_idx] & (1ULL << bit_idx)) {
+            if (rs->bitmap[word_idx] & (1ULL << bit_idx)) {
                 if (ones_count % sample_interval == 0) {
                     rs->select_samples[sample_idx++] = i;
                 }
@@ -149,7 +136,7 @@ int phf_rank_select_build(const uint64_t *bitmap, uint32_t bitmap_size, phf_rank
 }
 
 uint32_t phf_rank(const phf_rank_select_t *rs, uint32_t position) {
-    if (!rs || !rs->bitmap || position >= rs->bitmap_size) {
+    if (!rs || rs->bitmap.empty() || position >= rs->bitmap_size) {
         return 0;
     }
     
@@ -173,7 +160,7 @@ uint32_t phf_rank(const phf_rank_select_t *rs, uint32_t position) {
 }
 
 uint32_t phf_select(const phf_rank_select_t *rs, uint32_t k) {
-    if (!rs || !rs->bitmap || k >= rs->num_ones) {
+    if (!rs || rs->bitmap.empty() || k >= rs->num_ones) {
         return rs->bitmap_size;  /* Out of bounds */
     }
     
@@ -182,8 +169,8 @@ uint32_t phf_select(const phf_rank_select_t *rs, uint32_t k) {
     uint32_t sample_idx = k / sample_interval;
     
     uint32_t search_start = 0;
-    if (rs->select_samples && sample_idx > 0 && 
-        sample_idx - 1 < (rs->num_ones + sample_interval - 1) / sample_interval) {
+    if (!rs->select_samples.empty() && sample_idx > 0 && 
+        sample_idx - 1 < rs->select_samples.size()) {
         search_start = rs->select_samples[sample_idx - 1];
     }
     
@@ -213,25 +200,11 @@ uint32_t phf_select(const phf_rank_select_t *rs, uint32_t k) {
 void phf_rank_select_destroy(phf_rank_select_t *rs) {
     if (!rs) return;
     
-    if (rs->bitmap) {
-        free(rs->bitmap);
-        rs->bitmap = NULL;
-    }
-    
-    if (rs->block_ranks) {
-        free(rs->block_ranks);
-        rs->block_ranks = NULL;
-    }
-    
-    if (rs->mini_ranks) {
-        free(rs->mini_ranks);
-        rs->mini_ranks = NULL;
-    }
-    
-    if (rs->select_samples) {
-        free(rs->select_samples);
-        rs->select_samples = NULL;
-    }
-    
-    memset(rs, 0, sizeof(phf_rank_select_t));
+    rs->bitmap.clear();
+    rs->block_ranks.clear();
+    rs->mini_ranks.clear();
+    rs->select_samples.clear();
+    rs->bitmap_size = 0;
+    rs->num_blocks = 0;
+    rs->num_ones = 0;
 }

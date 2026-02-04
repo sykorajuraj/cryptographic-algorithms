@@ -1,179 +1,165 @@
 /**
- * @file phf_bdz.c
- * @brief BDZ (Bipartite/3-partite graph) implementation
+ * @file phf_bdz.cpp
+ * @brief BDZ (Bipartite/3-partite graph) implementation in C++
  */
 
 #include "phf.h"
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <memory>
+#include <vector>
+#include <array>
 
 #define BDZ_MAX_ATTEMPTS 100
 
-typedef struct edge_node {
+struct edge_node_t {
     uint32_t edge_idx;
-    struct edge_node *next;
-} edge_node_t;
+    std::unique_ptr<edge_node_t> next;
+    
+    edge_node_t(uint32_t idx) : edge_idx(idx), next(nullptr) {}
+};
 
-typedef struct {
-    edge_node_t **adj_lists;  /* Adjacency lists for each vertex */
-    uint32_t *degrees;         /* Vertex degrees */
-    uint32_t num_vertices;
-    uint32_t num_edges;
-    uint32_t (*edges)[3];      /* Edge array [edge_idx][vertex_0/1/2] */
-    uint8_t r;                 /* Number of partitions */
-} graph_t;
+class Graph {
+private:
+    std::vector<std::unique_ptr<edge_node_t>> adj_lists;
+    std::vector<uint32_t> degrees;
+    std::vector<std::array<uint32_t, 3>> edges_data;
+    uint32_t num_vertices_;
+    uint32_t num_edges_;
+    uint8_t r_;
 
-static graph_t *graph_create(uint32_t num_edges, uint32_t num_vertices, uint8_t r) {
-    graph_t *graph = calloc(1, sizeof(graph_t));
-    if (!graph) return NULL;
+public:
+    Graph(uint32_t num_edges, uint32_t num_vertices, uint8_t r)
+        : adj_lists(num_vertices), degrees(num_vertices, 0),
+          edges_data(num_edges), num_vertices_(num_vertices),
+          num_edges_(num_edges), r_(r) {}
     
-    graph->num_vertices = num_vertices;
-    graph->num_edges = num_edges;
-    graph->r = r;
-    
-    graph->adj_lists = calloc(num_vertices, sizeof(edge_node_t *));
-    graph->degrees = calloc(num_vertices, sizeof(uint32_t));
-    graph->edges = calloc(num_edges, sizeof(uint32_t[3]));
-    
-    if (!graph->adj_lists || !graph->degrees || !graph->edges) {
-        if (graph->adj_lists) free(graph->adj_lists);
-        if (graph->degrees) free(graph->degrees);
-        if (graph->edges) free(graph->edges);
-        free(graph);
-        return NULL;
-    }
-    
-    return graph;
-}
-
-static void graph_destroy(graph_t *graph) {
-    if (!graph) return;
-    
-    if (graph->adj_lists) {
-        for (uint32_t i = 0; i < graph->num_vertices; i++) {
-            edge_node_t *node = graph->adj_lists[i];
-            while (node) {
-                edge_node_t *next = node->next;
-                free(node);
-                node = next;
-            }
+    int add_edge(uint32_t edge_idx, const uint32_t vertices[3]) {
+        if (edge_idx >= num_edges_) {
+            std::cerr << "ERROR: Edge index " << edge_idx << " exceeds num_edges " << num_edges_ << std::endl;
+            return -1;
         }
-        free(graph->adj_lists);
+        
+        // Store edge vertices
+        for (uint8_t i = 0; i < r_; i++) {
+            edges_data[edge_idx][i] = vertices[i];
+        }
+        
+        // Add to adjacency lists and update degrees
+        for (uint8_t i = 0; i < r_; i++) {
+            uint32_t v = vertices[i];
+            
+            if (v >= num_vertices_) {
+                std::cerr << "ERROR: Vertex " << v << " exceeds num_vertices " << num_vertices_ << std::endl;
+                return -1;
+            }
+            
+            auto node = std::make_unique<edge_node_t>(edge_idx);
+            node->next = std::move(adj_lists[v]);
+            adj_lists[v] = std::move(node);
+            
+            degrees[v]++;
+        }
+        
+        return 0;
     }
     
-    if (graph->degrees) free(graph->degrees);
-    if (graph->edges) free(graph->edges);
-    free(graph);
-}
-
-static int graph_add_edge(graph_t *graph, uint32_t edge_idx, const uint32_t vertices[3]) {
-    /* Store edge vertices */
-    for (uint8_t i = 0; i < graph->r; i++) {
-        graph->edges[edge_idx][i] = vertices[i];
+    const std::array<uint32_t, 3>& get_edge(uint32_t idx) const {
+        return edges_data[idx];
     }
     
-    /* Add to adjacency lists and update degrees */
-    for (uint8_t i = 0; i < graph->r; i++) {
-        uint32_t v = vertices[i];
-        
-        edge_node_t *node = malloc(sizeof(edge_node_t));
-        if (!node) return -1;
-        
-        node->edge_idx = edge_idx;
-        node->next = graph->adj_lists[v];
-        graph->adj_lists[v] = node;
-        
-        graph->degrees[v]++;
+    uint32_t get_degree(uint32_t v) const {
+        return v < num_vertices_ ? degrees[v] : 0;
     }
     
-    return 0;
-}
+    void decrement_degree(uint32_t v) {
+        if (v < num_vertices_ && degrees[v] > 0) {
+            degrees[v]--;
+        }
+    }
+    
+    const edge_node_t* get_adj_list(uint32_t v) const {
+        return v < num_vertices_ ? adj_lists[v].get() : nullptr;
+    }
+    
+    uint32_t num_vertices() const { return num_vertices_; }
+    uint32_t num_edges() const { return num_edges_; }
+    uint8_t r() const { return r_; }
+};
 
 bool phf_bdz_is_acyclic(const uint32_t (*edges)[3], uint32_t num_edges, 
                         uint32_t num_vertices, uint8_t r, uint32_t *ordering) {
     if (!edges || !ordering || num_edges == 0) return false;
     
-    /* Create working graph */
-    graph_t *graph = graph_create(num_edges, num_vertices, r);
-    if (!graph) return false;
+    auto graph = std::make_unique<Graph>(num_edges, num_vertices, r);
     
     for (uint32_t i = 0; i < num_edges; i++) {
-        if (graph_add_edge(graph, i, edges[i]) != 0) {
-            graph_destroy(graph);
+        if (graph->add_edge(i, edges[i]) != 0) {
             return false;
         }
     }
     
-    /* Queue for edges to process */
-    uint32_t *queue = malloc(num_edges * sizeof(uint32_t));
-    uint8_t *removed = calloc(num_edges, sizeof(uint8_t));
+    // Queue for edges to process
+    std::vector<uint32_t> queue;
+    std::vector<uint8_t> removed(num_edges, 0);
+    queue.reserve(num_edges);
     
-    if (!queue || !removed) {
-        free(queue);
-        free(removed);
-        graph_destroy(graph);
-        return false;
-    }
-    
-    uint32_t queue_head = 0;
-    uint32_t queue_tail = 0;
-    
-    /* Find all edges with at least one degree-1 vertex */
+    // Find all edges with at least one degree-1 vertex
     for (uint32_t i = 0; i < num_edges; i++) {
         for (uint8_t j = 0; j < r; j++) {
-            if (graph->degrees[edges[i][j]] == 1) {
-                queue[queue_tail++] = i;
+            uint32_t vertex = edges[i][j];
+            if (vertex < num_vertices && graph->get_degree(vertex) == 1) {
+                queue.push_back(i);
                 break;
             }
         }
     }
     
     uint32_t removed_count = 0;
+    size_t queue_head = 0;
     
-    /* Process queue */
-    while (queue_head < queue_tail) {
+    // Process queue
+    while (queue_head < queue.size()) {
         uint32_t edge_idx = queue[queue_head++];
         
         if (removed[edge_idx]) continue;
         
-        /* Add to ordering (from tail, so reverse order) */
+        // Add to ordering (from tail, so reverse order)
         ordering[removed_count++] = edge_idx;
         removed[edge_idx] = 1;
         
-        /* Update degrees of vertices */
+        // Update degrees of vertices
         for (uint8_t i = 0; i < r; i++) {
             uint32_t v = edges[edge_idx][i];
-            if (graph->degrees[v] > 0) {
-                graph->degrees[v]--;
-            }
+            graph->decrement_degree(v);
         }
         
-        /* Check all edges connected to these vertices */
+        // Check all edges connected to these vertices
         for (uint8_t i = 0; i < r; i++) {
             uint32_t v = edges[edge_idx][i];
             
-            edge_node_t *node = graph->adj_lists[v];
+            if (v >= num_vertices) continue;
+            
+            const edge_node_t *node = graph->get_adj_list(v);
             while (node) {
                 uint32_t e = node->edge_idx;
                 if (!removed[e]) {
-                    /* Check if this edge now has a degree-1 vertex */
+                    // Check if this edge now has a degree-1 vertex
                     for (uint8_t j = 0; j < r; j++) {
-                        if (graph->degrees[edges[e][j]] == 1) {
-                            queue[queue_tail++] = e;
+                        uint32_t edge_v = edges[e][j];
+                        if (edge_v < num_vertices && graph->get_degree(edge_v) == 1) {
+                            queue.push_back(e);
                             break;
                         }
                     }
                 }
-                node = node->next;
+                node = node->next.get();
             }
         }
     }
     
-    free(queue);
-    free(removed);
-    graph_destroy(graph);
-    
-    /* Graph is acyclic if all edges were removed */
+    // Graph is acyclic if all edges were removed
     return removed_count == num_edges;
 }
 
@@ -181,42 +167,55 @@ int phf_bdz_assign_values(const uint32_t (*edges)[3], uint32_t num_edges,
                           uint8_t *g_array, uint32_t g_size, uint8_t r) {
     if (!edges || !g_array || num_edges == 0) return -1;
     
-    /* Initialize g_array to r (unassigned) */
-    memset(g_array, r, g_size);
+    // Initialize g_array to r (unassigned)
+    std::memset(g_array, r, g_size);
     
-    uint8_t *visited = calloc(g_size, sizeof(uint8_t));
-    if (!visited) return -1;
+    std::vector<uint8_t> visited(g_size, 0);
     
-    /* Process edges in reverse order */
-    for (int i = (int)num_edges - 1; i >= 0; i--) {
-        /* Find first unvisited vertex */
+    // Process edges in reverse order
+    for (int i = static_cast<int>(num_edges) - 1; i >= 0; i--) {
+        // Find first unvisited vertex
         int unvisited_idx = -1;
         uint32_t unvisited_vertex = 0;
         
         for (uint8_t j = 0; j < r; j++) {
-            if (!visited[edges[i][j]]) {
+            uint32_t vertex = edges[i][j];
+            
+            if (vertex >= g_size) {
+                std::cerr << "ERROR: Vertex " << vertex << " exceeds g_size " << g_size 
+                         << " at edge " << i << " partition " << static_cast<int>(j) << std::endl;
+                return -1;
+            }
+            
+            if (!visited[vertex]) {
                 unvisited_idx = j;
-                unvisited_vertex = edges[i][j];
+                unvisited_vertex = vertex;
                 break;
             }
         }
         
         if (unvisited_idx == -1) {
-            /* All vertices visited - shouldn't happen */
-            free(visited);
+            std::cerr << "ERROR: All vertices visited at edge " << i << std::endl;
             return -1;
         }
         
-        /* Calculate sum of already-assigned vertices */
-        uint32_t sum = 0;
+        // Calculate sum of already-assigned vertices
+        uint8_t sum = 0;
         for (uint8_t j = 0; j < r; j++) {
-            if (j != unvisited_idx && g_array[edges[i][j]] < r) {
-                sum += g_array[edges[i][j]];
+            uint32_t vertex = edges[i][j];
+            
+            if (vertex >= g_size) {
+                std::cerr << "ERROR: Vertex " << vertex << " exceeds g_size " << g_size << std::endl;
+                return -1;
+            }
+            
+            if (j != unvisited_idx && g_array[vertex] < r) {
+                sum += g_array[vertex];
             }
         }
         
-        /* Assign value to make sum equal to edge index mod r */
-        uint32_t target = (uint32_t)i % r;
+        // Assign value to make sum equal to edge index mod r
+        uint32_t target = static_cast<uint32_t>(i) % r;
         uint8_t g_value;
         
         if (target >= sum % r) {
@@ -225,133 +224,146 @@ int phf_bdz_assign_values(const uint32_t (*edges)[3], uint32_t num_edges,
             g_value = (r - ((sum % r) - target)) % r;
         }
         
+        if (unvisited_vertex >= g_size) {
+            std::cerr << "ERROR: Cannot assign to vertex " << unvisited_vertex 
+                     << " (g_size=" << g_size << ")" << std::endl;
+            return -1;
+        }
+        
         g_array[unvisited_vertex] = g_value;
         visited[unvisited_vertex] = 1;
     }
     
-    free(visited);
     return 0;
 }
 
 int phf_bdz_build(const phf_kv_pair_t *keys, uint32_t num_keys, uint8_t r, bool minimal, phf_bdz_t *bdz) {
     if (!keys || !bdz || num_keys == 0 || (r != 2 && r != 3)) return -1;
     
-    memset(bdz, 0, sizeof(phf_bdz_t));
+    // Clear existing data
+    bdz->g_array.clear();
+    bdz->g_size = 0;
+    bdz->num_vertices = 0;
     
     bdz->r = r;
     bdz->is_minimal = minimal;
     
-    /* Calculate number of vertices per partition */
+    // Calculate number of vertices per partition
     if (r == 2) {
-        /* Bipartite: need ~2n vertices total */
-        bdz->num_vertices = minimal ? num_keys : (uint32_t)(num_keys * 1.1);
+        // Bipartite: need ~2n vertices total
+        bdz->num_vertices = minimal ? num_keys : static_cast<uint32_t>(num_keys * 1.1);
     } else {
-        /* 3-partite: need ~1.23n vertices total */
-        bdz->num_vertices = minimal ? (uint32_t)(num_keys * 0.41) : (uint32_t)(num_keys * 0.45);
+        // 3-partite needs larger multiplier to ensure success
+        bdz->num_vertices = minimal ? static_cast<uint32_t>(num_keys * 0.41) : static_cast<uint32_t>(num_keys * 0.5);
     }
     
     if (bdz->num_vertices == 0) bdz->num_vertices = 1;
     
+    // Calculate g_size = total vertices across all partitions
     bdz->g_size = bdz->num_vertices * r;
     
-    /* Try to build acyclic graph */
-    int attempt = 0;
-    int success = 0;
-    
-    uint32_t (*temp_edges)[3] = malloc(num_keys * sizeof(uint32_t[3]));
-    uint32_t *ordering = malloc(num_keys * sizeof(uint32_t));
-    
-    if (!temp_edges || !ordering) {
-        free(temp_edges);
-        free(ordering);
+    if (bdz->g_size == 0) {
+        std::cerr << "ERROR: Invalid g_size " << bdz->g_size << " for " << num_keys << " keys" << std::endl;
         return -1;
     }
+    
+    // Try to build acyclic graph
+    int attempt = 0;
+    bool success = false;
+    
+    std::vector<std::array<uint32_t, 3>> temp_edges(num_keys);
+    std::vector<uint32_t> ordering(num_keys);
     
     while (!success && attempt < BDZ_MAX_ATTEMPTS) {
         attempt++;
         
-        /* Generate new hash seeds */
+        // Generate new hash seeds
         if (phf_hash_generate_seeds(&bdz->hash, r) != 0) {
-            free(temp_edges);
-            free(ordering);
             return -1;
         }
         
-        /* Build edges */
+        // Build edges with validation
+        bool edge_build_failed = false;
         for (uint32_t i = 0; i < num_keys; i++) {
-            temp_edges[i][0] = phf_hash_universal(keys[i].key, keys[i].key_len,
-                                                   bdz->hash.seed0, bdz->num_vertices);
-            temp_edges[i][1] = bdz->num_vertices + 
-                              phf_hash_universal(keys[i].key, keys[i].key_len,
-                                                  bdz->hash.seed1, bdz->num_vertices);
+            uint32_t h0 = phf_hash_universal(keys[i].key, keys[i].key_len,
+                                              bdz->hash.seed0, bdz->num_vertices);
+            uint32_t h1 = phf_hash_universal(keys[i].key, keys[i].key_len,
+                                              bdz->hash.seed1, bdz->num_vertices);
+            
+            temp_edges[i][0] = h0;
+            temp_edges[i][1] = bdz->num_vertices + h1;
+            
+            if (temp_edges[i][0] >= bdz->g_size || temp_edges[i][1] >= bdz->g_size) {
+                std::cerr << "ERROR: Edge vertex exceeds g_size (attempt " << attempt 
+                         << ", edge " << i << ": v0=" << temp_edges[i][0] 
+                         << " v1=" << temp_edges[i][1] << " g_size=" << bdz->g_size << ")" << std::endl;
+                edge_build_failed = true;
+                break;
+            }
             
             if (r == 3) {
-                temp_edges[i][2] = 2 * bdz->num_vertices + 
-                                  phf_hash_universal(keys[i].key, keys[i].key_len,
-                                                      bdz->hash.seed2, bdz->num_vertices);
+                uint32_t h2 = phf_hash_universal(keys[i].key, keys[i].key_len,
+                                                  bdz->hash.seed2, bdz->num_vertices);
+                temp_edges[i][2] = 2 * bdz->num_vertices + h2;
+                
+                if (temp_edges[i][2] >= bdz->g_size) {
+                    std::cerr << "ERROR: Edge vertex 2 exceeds g_size (attempt " << attempt 
+                             << ", edge " << i << ": v2=" << temp_edges[i][2] 
+                             << " g_size=" << bdz->g_size << ")" << std::endl;
+                    edge_build_failed = true;
+                    break;
+                }
             } else {
-                temp_edges[i][2] = 0;  /* Not used for bipartite */
+                temp_edges[i][2] = 0;  // Not used for bipartite
             }
         }
         
-        /* Check if acyclic */
-        if (phf_bdz_is_acyclic((const uint32_t (*)[3])temp_edges, num_keys, 
-                               bdz->g_size, r, ordering)) {
-            success = 1;
+        if (edge_build_failed) {
+            continue;  // Try next attempt
+        }
+        
+        // Check if acyclic - pass g_size as num_vertices parameter
+        if (phf_bdz_is_acyclic(reinterpret_cast<const uint32_t (*)[3]>(temp_edges.data()), 
+                               num_keys, bdz->g_size, r, ordering.data())) {
+            success = true;
         }
     }
     
     if (!success) {
-        free(temp_edges);
-        free(ordering);
+        std::cerr << "ERROR: Failed to build acyclic graph after " << BDZ_MAX_ATTEMPTS << " attempts" << std::endl;
         return -1;
     }
     
-    /* Allocate g_array */
-    bdz->g_array = malloc(bdz->g_size * sizeof(uint8_t));
-    if (!bdz->g_array) {
-        free(temp_edges);
-        free(ordering);
-        return -1;
-    }
+    // Allocate g_array
+    bdz->g_array.resize(bdz->g_size);
     
-    /* Reorder edges according to removal order */
-    uint32_t (*ordered_edges)[3] = malloc(num_keys * sizeof(uint32_t[3]));
-    if (!ordered_edges) {
-        free(bdz->g_array);
-        bdz->g_array = NULL;
-        free(temp_edges);
-        free(ordering);
-        return -1;
-    }
+    // Reorder edges according to removal order
+    std::vector<std::array<uint32_t, 3>> ordered_edges(num_keys);
     
     for (uint32_t i = 0; i < num_keys; i++) {
         uint32_t edge_idx = ordering[i];
-        for (uint8_t j = 0; j < 3; j++) {
-            ordered_edges[i][j] = temp_edges[edge_idx][j];
+        
+        if (edge_idx >= num_keys) {
+            std::cerr << "ERROR: Invalid ordering index " << edge_idx << " >= " << num_keys << std::endl;
+            bdz->g_array.clear();
+            return -1;
         }
+        
+        ordered_edges[i] = temp_edges[edge_idx];
     }
     
-    /* Assign values */
-    if (phf_bdz_assign_values((const uint32_t (*)[3])ordered_edges, num_keys,
-                              bdz->g_array, bdz->g_size, r) != 0) {
-        free(bdz->g_array);
-        bdz->g_array = NULL;
-        free(ordered_edges);
-        free(temp_edges);
-        free(ordering);
+    // Assign values
+    if (phf_bdz_assign_values(reinterpret_cast<const uint32_t (*)[3]>(ordered_edges.data()), 
+                              num_keys, bdz->g_array.data(), bdz->g_size, r) != 0) {
+        bdz->g_array.clear();
         return -1;
     }
-    
-    free(ordered_edges);
-    free(temp_edges);
-    free(ordering);
     
     return 0;
 }
 
 uint32_t phf_bdz_hash(const phf_bdz_t *bdz, const void *key, size_t key_len) {
-    if (!bdz || !key || !bdz->g_array) return 0;
+    if (!bdz || !key || bdz->g_array.empty()) return 0;
     
     uint32_t h0 = phf_hash_universal(key, key_len, bdz->hash.seed0, bdz->num_vertices);
     uint32_t h1 = phf_hash_universal(key, key_len, bdz->hash.seed1, bdz->num_vertices);
@@ -359,14 +371,22 @@ uint32_t phf_bdz_hash(const phf_bdz_t *bdz, const void *key, size_t key_len) {
     uint32_t v0 = h0;
     uint32_t v1 = bdz->num_vertices + h1;
     
+    if (v0 >= bdz->g_array.size() || v1 >= bdz->g_array.size()) {
+        return 0;
+    }
+    
     uint8_t g0 = bdz->g_array[v0];
     uint8_t g1 = bdz->g_array[v1];
     
     if (bdz->r == 3) {
         uint32_t h2 = phf_hash_universal(key, key_len, bdz->hash.seed2, bdz->num_vertices);
         uint32_t v2 = 2 * bdz->num_vertices + h2;
-        uint8_t g2 = bdz->g_array[v2];
         
+        if (v2 >= bdz->g_array.size()) {
+            return 0;
+        }
+        
+        uint8_t g2 = bdz->g_array[v2];
         return (g0 + g1 + g2) % bdz->r;
     } else {
         return (g0 + g1) % bdz->r;
@@ -376,10 +396,9 @@ uint32_t phf_bdz_hash(const phf_bdz_t *bdz, const void *key, size_t key_len) {
 void phf_bdz_destroy(phf_bdz_t *bdz) {
     if (!bdz) return;
     
-    if (bdz->g_array) {
-        free(bdz->g_array);
-        bdz->g_array = NULL;
-    }
-    
-    memset(bdz, 0, sizeof(phf_bdz_t));
+    bdz->g_array.clear();
+    bdz->g_size = 0;
+    bdz->num_vertices = 0;
+    bdz->r = 0;
+    bdz->is_minimal = false;
 }

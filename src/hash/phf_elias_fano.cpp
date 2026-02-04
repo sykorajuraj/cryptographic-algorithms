@@ -1,19 +1,21 @@
 /**
- * @file src/hash/phf_elias_fano.c
+ * @file phf_elias_fano.cpp
  * @brief Elias-Fano compression for arrays with extremes
  */
 
 #include "phf.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
+#include <vector>
+#include <algorithm>
 
 /* Simple Dense Coding table */
-typedef struct {
+struct sdc_entry_t {
     uint32_t value;
     uint8_t code_len;
     uint32_t code;
-} sdc_entry_t;
+};
 
 int phf_elias_fano_compress(const uint32_t *array, uint32_t array_len,
                             uint64_t **compressed, uint32_t *compressed_size) {
@@ -21,7 +23,6 @@ int phf_elias_fano_compress(const uint32_t *array, uint32_t array_len,
     
     /* Find max value and build histogram */
     uint32_t max_val = 0;
-    uint32_t *histogram = NULL;
     
     for (uint32_t i = 0; i < array_len; i++) {
         if (array[i] > max_val) max_val = array[i];
@@ -30,53 +31,40 @@ int phf_elias_fano_compress(const uint32_t *array, uint32_t array_len,
     if (max_val == 0) {
         /* All zeros - trivial compression */
         *compressed_size = 1;
-        *compressed = calloc(1, sizeof(uint64_t));
+        *compressed = static_cast<uint64_t*>(std::calloc(1, sizeof(uint64_t)));
         return *compressed ? 0 : -1;
     }
     
     /* Build histogram */
-    histogram = calloc(max_val + 1, sizeof(uint32_t));
-    if (!histogram) return -1;
+    std::vector<uint32_t> histogram(max_val + 1, 0);
     
     for (uint32_t i = 0; i < array_len; i++) {
         histogram[array[i]]++;
     }
     
     /* Sort values by frequency (for Simple Dense Coding) */
-    typedef struct { uint32_t value; uint32_t count; } freq_t;
-    freq_t *freqs = malloc((max_val + 1) * sizeof(freq_t));
-    if (!freqs) {
-        free(histogram);
-        return -1;
-    }
+    struct freq_t {
+        uint32_t value;
+        uint32_t count;
+    };
     
-    uint32_t num_unique = 0;
+    std::vector<freq_t> freqs;
     for (uint32_t i = 0; i <= max_val; i++) {
         if (histogram[i] > 0) {
-            freqs[num_unique].value = i;
-            freqs[num_unique].count = histogram[i];
-            num_unique++;
+            freqs.push_back({i, histogram[i]});
         }
     }
     
     /* Sort by frequency (descending) */
-    for (uint32_t i = 0; i < num_unique - 1; i++) {
-        for (uint32_t j = 0; j < num_unique - i - 1; j++) {
-            if (freqs[j].count < freqs[j + 1].count) {
-                freq_t temp = freqs[j];
-                freqs[j] = freqs[j + 1];
-                freqs[j + 1] = temp;
-            }
-        }
-    }
+    std::sort(freqs.begin(), freqs.end(),
+              [](const freq_t& a, const freq_t& b) {
+                  return a.count > b.count;
+              });
+    
+    uint32_t num_unique = freqs.size();
     
     /* Assign Simple Dense Codes */
-    sdc_entry_t *sdc_table = malloc(num_unique * sizeof(sdc_entry_t));
-    if (!sdc_table) {
-        free(freqs);
-        free(histogram);
-        return -1;
-    }
+    std::vector<sdc_entry_t> sdc_table(num_unique);
     
     /* Simple SDC: first values get shorter codes */
     uint32_t code_idx = 0;
@@ -119,17 +107,13 @@ int phf_elias_fano_compress(const uint32_t *array, uint32_t array_len,
     
     /* Allocate compressed buffer */
     *compressed_size = (total_bits + 63) / 64;
-    *compressed = calloc(*compressed_size, sizeof(uint64_t));
+    *compressed = static_cast<uint64_t*>(std::calloc(*compressed_size, sizeof(uint64_t)));
     
     if (!*compressed) {
-        free(sdc_table);
-        free(freqs);
-        free(histogram);
         return -1;
     }
     
     /* Build compressed representation (simplified) */
-    /* This is a basic implementation - full Elias-Fano would be more complex */
     uint32_t bit_pos = 0;
     
     for (uint32_t i = 0; i < array_len; i++) {
@@ -159,10 +143,6 @@ int phf_elias_fano_compress(const uint32_t *array, uint32_t array_len,
             }
         }
     }
-    
-    free(sdc_table);
-    free(freqs);
-    free(histogram);
     
     return 0;
 }

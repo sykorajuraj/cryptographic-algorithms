@@ -1,45 +1,56 @@
 /**
- * @file src/hash/phf_api.c
+ * @file phf_api.cpp
  * @brief High-level PHF API for encryption/decryption
  */
 
 #include "phf.h"
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
 
 int phf_encrypt_init(const phf_kv_pair_t *keys, uint32_t num_keys, 
                      phf_type_t type, phf_encrypt_ctx_t *ctx) {
     if (!keys || !ctx || num_keys == 0) return -1;
     
-    memset(ctx, 0, sizeof(phf_encrypt_ctx_t));
+    // Clear existing data
+    ctx->phf.reset();
+    ctx->encrypted_table.clear();
+    ctx->nonce.clear();
+    ctx->table_size = 0;
     
     /* Allocate PHF context */
-    ctx->phf = malloc(sizeof(phf_ctx_t));
-    if (!ctx->phf) return -1;
-    
-    memset(ctx->phf, 0, sizeof(phf_ctx_t));
+    ctx->phf = std::make_unique<phf_ctx_t>();
     ctx->phf->type = type;
     ctx->phf->num_keys = num_keys;
+    
+    // Destroy old union member and construct new one
+    if (type == phf_type_t::PHF_TYPE_CHD) {
+        ctx->phf->impl.chd.~phf_chd_t();
+        new (&ctx->phf->impl.chd) phf_chd_t();
+    } else {
+        ctx->phf->impl.chd.~phf_chd_t();
+        new (&ctx->phf->impl.bdz) phf_bdz_t();
+    }
     
     int result = -1;
     
     /* Build PHF based on type */
     switch (type) {
-        case PHF_TYPE_CHD:
+        case phf_type_t::PHF_TYPE_CHD:
             result = phf_chd_build(keys, num_keys, 0.3f, &ctx->phf->impl.chd);
             if (result == 0) {
                 ctx->table_size = ctx->phf->impl.chd.table_size;
             }
             break;
             
-        case PHF_TYPE_BDZ_2PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_2PARTITE:
             result = phf_bdz_build(keys, num_keys, 2, false, &ctx->phf->impl.bdz);
             if (result == 0) {
                 ctx->table_size = ctx->phf->impl.bdz.num_vertices * 2;
             }
             break;
             
-        case PHF_TYPE_BDZ_3PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_3PARTITE:
             result = phf_bdz_build(keys, num_keys, 3, false, &ctx->phf->impl.bdz);
             if (result == 0) {
                 ctx->table_size = ctx->phf->impl.bdz.num_vertices * 3;
@@ -47,35 +58,24 @@ int phf_encrypt_init(const phf_kv_pair_t *keys, uint32_t num_keys,
             break;
             
         default:
-            free(ctx->phf);
-            ctx->phf = NULL;
+            ctx->phf.reset();
             return -1;
     }
     
     if (result != 0) {
-        free(ctx->phf);
-        ctx->phf = NULL;
+        ctx->phf.reset();
         return -1;
     }
     
     /* Allocate encrypted data table */
-    ctx->encrypted_table = calloc(ctx->table_size, sizeof(void *));
-    if (!ctx->encrypted_table) {
-        phf_encrypt_destroy(ctx);
-        return -1;
-    }
+    ctx->encrypted_table.resize(ctx->table_size);
     
     /* Generate nonce */
-    ctx->nonce_len = 16;
-    ctx->nonce = malloc(ctx->nonce_len);
-    if (!ctx->nonce) {
-        phf_encrypt_destroy(ctx);
-        return -1;
-    }
+    ctx->nonce.resize(16);
     
     /* Fill with random data */
-    for (size_t i = 0; i < ctx->nonce_len; i++) {
-        ctx->nonce[i] = rand() & 0xFF;
+    for (size_t i = 0; i < ctx->nonce.size(); i++) {
+        ctx->nonce[i] = std::rand() & 0xFF;
     }
     
     return 0;
@@ -90,12 +90,12 @@ int phf_encrypt(phf_encrypt_ctx_t *ctx, const void *key, size_t key_len,
     uint32_t pos = 0;
     
     switch (ctx->phf->type) {
-        case PHF_TYPE_CHD:
+        case phf_type_t::PHF_TYPE_CHD:
             pos = phf_chd_hash(&ctx->phf->impl.chd, key, key_len);
             break;
             
-        case PHF_TYPE_BDZ_2PARTITE:
-        case PHF_TYPE_BDZ_3PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_2PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_3PARTITE:
             pos = phf_bdz_hash(&ctx->phf->impl.bdz, key, key_len);
             break;
             
@@ -107,29 +107,18 @@ int phf_encrypt(phf_encrypt_ctx_t *ctx, const void *key, size_t key_len,
     
     /* Simple XOR encryption with nonce (for demonstration) */
     *ciphertext_len = plaintext_len;
-    *ciphertext = malloc(*ciphertext_len);
+    *ciphertext = std::malloc(*ciphertext_len);
     if (!*ciphertext) return -1;
     
-    const uint8_t *pt = (const uint8_t *)plaintext;
-    uint8_t *ct = (uint8_t *)*ciphertext;
+    const uint8_t *pt = static_cast<const uint8_t *>(plaintext);
+    uint8_t *ct = static_cast<uint8_t *>(*ciphertext);
     
     for (size_t i = 0; i < plaintext_len; i++) {
-        ct[i] = pt[i] ^ ctx->nonce[i % ctx->nonce_len] ^ (pos & 0xFF);
+        ct[i] = pt[i] ^ ctx->nonce[i % ctx->nonce.size()] ^ (pos & 0xFF);
     }
     
     /* Store in table */
-    if (ctx->encrypted_table[pos]) {
-        free(ctx->encrypted_table[pos]);
-    }
-    
-    ctx->encrypted_table[pos] = malloc(*ciphertext_len);
-    if (!ctx->encrypted_table[pos]) {
-        free(*ciphertext);
-        *ciphertext = NULL;
-        return -1;
-    }
-    
-    memcpy(ctx->encrypted_table[pos], *ciphertext, *ciphertext_len);
+    ctx->encrypted_table[pos] = std::make_unique<std::vector<uint8_t>>(ct, ct + *ciphertext_len);
     
     return 0;
 }
@@ -143,12 +132,12 @@ int phf_decrypt(phf_encrypt_ctx_t *ctx, const void *key, size_t key_len,
     uint32_t pos = 0;
     
     switch (ctx->phf->type) {
-        case PHF_TYPE_CHD:
+        case phf_type_t::PHF_TYPE_CHD:
             pos = phf_chd_hash(&ctx->phf->impl.chd, key, key_len);
             break;
             
-        case PHF_TYPE_BDZ_2PARTITE:
-        case PHF_TYPE_BDZ_3PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_2PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_3PARTITE:
             pos = phf_bdz_hash(&ctx->phf->impl.bdz, key, key_len);
             break;
             
@@ -160,14 +149,14 @@ int phf_decrypt(phf_encrypt_ctx_t *ctx, const void *key, size_t key_len,
     
     /* Simple XOR decryption (same as encryption) */
     *plaintext_len = ciphertext_len;
-    *plaintext = malloc(*plaintext_len);
+    *plaintext = std::malloc(*plaintext_len);
     if (!*plaintext) return -1;
     
-    const uint8_t *ct = (const uint8_t *)ciphertext;
-    uint8_t *pt = (uint8_t *)*plaintext;
+    const uint8_t *ct = static_cast<const uint8_t *>(ciphertext);
+    uint8_t *pt = static_cast<uint8_t *>(*plaintext);
     
     for (size_t i = 0; i < ciphertext_len; i++) {
-        pt[i] = ct[i] ^ ctx->nonce[i % ctx->nonce_len] ^ (pos & 0xFF);
+        pt[i] = ct[i] ^ ctx->nonce[i % ctx->nonce.size()] ^ (pos & 0xFF);
     }
     
     return 0;
@@ -178,41 +167,22 @@ void phf_encrypt_destroy(phf_encrypt_ctx_t *ctx) {
     
     if (ctx->phf) {
         switch (ctx->phf->type) {
-            case PHF_TYPE_CHD:
+            case phf_type_t::PHF_TYPE_CHD:
                 phf_chd_destroy(&ctx->phf->impl.chd);
                 break;
                 
-            case PHF_TYPE_BDZ_2PARTITE:
-            case PHF_TYPE_BDZ_3PARTITE:
+            case phf_type_t::PHF_TYPE_BDZ_2PARTITE:
+            case phf_type_t::PHF_TYPE_BDZ_3PARTITE:
                 phf_bdz_destroy(&ctx->phf->impl.bdz);
                 break;
         }
         
-        if (ctx->phf->compression) {
-            phf_rank_select_destroy(ctx->phf->compression);
-            free(ctx->phf->compression);
-        }
-        
-        free(ctx->phf);
-        ctx->phf = NULL;
+        ctx->phf.reset();
     }
     
-    if (ctx->encrypted_table) {
-        for (uint32_t i = 0; i < ctx->table_size; i++) {
-            if (ctx->encrypted_table[i]) {
-                free(ctx->encrypted_table[i]);
-            }
-        }
-        free(ctx->encrypted_table);
-        ctx->encrypted_table = NULL;
-    }
-    
-    if (ctx->nonce) {
-        free(ctx->nonce);
-        ctx->nonce = NULL;
-    }
-    
-    memset(ctx, 0, sizeof(phf_encrypt_ctx_t));
+    ctx->encrypted_table.clear();
+    ctx->nonce.clear();
+    ctx->table_size = 0;
 }
 
 int phf_calculate_params(uint32_t num_keys, phf_type_t type, 
@@ -220,19 +190,19 @@ int phf_calculate_params(uint32_t num_keys, phf_type_t type,
     if (!epsilon || !table_size || num_keys == 0) return -1;
     
     switch (type) {
-        case PHF_TYPE_CHD:
+        case phf_type_t::PHF_TYPE_CHD:
             *epsilon = 0.3f;  /* 30% overhead */
-            *table_size = (uint32_t)((1.0f + *epsilon) * num_keys);
+            *table_size = static_cast<uint32_t>((1.0f + *epsilon) * num_keys);
             break;
             
-        case PHF_TYPE_BDZ_2PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_2PARTITE:
             *epsilon = 1.0f;  /* 100% overhead (2n table) */
             *table_size = num_keys * 2;
             break;
             
-        case PHF_TYPE_BDZ_3PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_3PARTITE:
             *epsilon = 0.23f;  /* 23% overhead (1.23n table) */
-            *table_size = (uint32_t)(num_keys * 1.23f);
+            *table_size = static_cast<uint32_t>(num_keys * 1.23f);
             break;
             
         default:
@@ -249,17 +219,17 @@ int phf_get_memory_stats(const phf_ctx_t *phf, size_t *total_bytes, size_t *meta
     *metadata_bytes = 0;
     
     switch (phf->type) {
-        case PHF_TYPE_CHD: {
+        case phf_type_t::PHF_TYPE_CHD: {
             const phf_chd_t *chd = &phf->impl.chd;
-            *metadata_bytes = chd->num_buckets * sizeof(uint32_t);  /* displacements */
+            *metadata_bytes = chd->displacements.size() * sizeof(uint32_t);
             *total_bytes = *metadata_bytes + sizeof(phf_chd_t);
             break;
         }
         
-        case PHF_TYPE_BDZ_2PARTITE:
-        case PHF_TYPE_BDZ_3PARTITE: {
+        case phf_type_t::PHF_TYPE_BDZ_2PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_3PARTITE: {
             const phf_bdz_t *bdz = &phf->impl.bdz;
-            *metadata_bytes = bdz->g_size * sizeof(uint8_t);  /* g_array */
+            *metadata_bytes = bdz->g_array.size() * sizeof(uint8_t);
             *total_bytes = *metadata_bytes + sizeof(phf_bdz_t);
             break;
         }
@@ -284,17 +254,17 @@ int phf_serialize(const phf_ctx_t *phf, void **buffer, size_t *buffer_len) {
     size_t total_size = sizeof(phf_type_t) + sizeof(uint32_t);
     
     switch (phf->type) {
-        case PHF_TYPE_CHD:
+        case phf_type_t::PHF_TYPE_CHD:
             total_size += sizeof(phf_hash_config_t);
-            total_size += 3 * sizeof(uint32_t) + sizeof(float);  /* num_buckets, table_size, epsilon */
-            total_size += phf->impl.chd.num_buckets * sizeof(uint32_t);
+            total_size += 3 * sizeof(uint32_t) + sizeof(float);
+            total_size += phf->impl.chd.displacements.size() * sizeof(uint32_t);
             break;
             
-        case PHF_TYPE_BDZ_2PARTITE:
-        case PHF_TYPE_BDZ_3PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_2PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_3PARTITE:
             total_size += sizeof(phf_hash_config_t);
-            total_size += 2 * sizeof(uint32_t) + sizeof(uint8_t) + sizeof(bool);  /* g_size, num_vertices, r, is_minimal */
-            total_size += phf->impl.bdz.g_size * sizeof(uint8_t);
+            total_size += 2 * sizeof(uint32_t) + sizeof(uint8_t) + sizeof(bool);
+            total_size += phf->impl.bdz.g_array.size() * sizeof(uint8_t);
             break;
             
         default:
@@ -302,57 +272,53 @@ int phf_serialize(const phf_ctx_t *phf, void **buffer, size_t *buffer_len) {
     }
     
     /* Allocate buffer */
-    *buffer = malloc(total_size);
+    *buffer = std::malloc(total_size);
     if (!*buffer) return -1;
     
     *buffer_len = total_size;
     
-    uint8_t *ptr = (uint8_t *)*buffer;
+    uint8_t *ptr = static_cast<uint8_t *>(*buffer);
     
     /* Write type */
-    memcpy(ptr, &phf->type, sizeof(phf_type_t));
+    std::memcpy(ptr, &phf->type, sizeof(phf_type_t));
     ptr += sizeof(phf_type_t);
     
     /* Write num_keys */
-    memcpy(ptr, &phf->num_keys, sizeof(uint32_t));
+    std::memcpy(ptr, &phf->num_keys, sizeof(uint32_t));
     ptr += sizeof(uint32_t);
     
     /* Write type-specific data */
     switch (phf->type) {
-        case PHF_TYPE_CHD: {
-            /* Write CHD metadata */
-            memcpy(ptr, &phf->impl.chd.hash, sizeof(phf_hash_config_t));
+        case phf_type_t::PHF_TYPE_CHD: {
+            std::memcpy(ptr, &phf->impl.chd.hash, sizeof(phf_hash_config_t));
             ptr += sizeof(phf_hash_config_t);
-            memcpy(ptr, &phf->impl.chd.num_buckets, sizeof(uint32_t));
+            std::memcpy(ptr, &phf->impl.chd.num_buckets, sizeof(uint32_t));
             ptr += sizeof(uint32_t);
-            memcpy(ptr, &phf->impl.chd.table_size, sizeof(uint32_t));
+            std::memcpy(ptr, &phf->impl.chd.table_size, sizeof(uint32_t));
             ptr += sizeof(uint32_t);
-            memcpy(ptr, &phf->impl.chd.epsilon, sizeof(float));
+            std::memcpy(ptr, &phf->impl.chd.epsilon, sizeof(float));
             ptr += sizeof(float);
             
-            /* Write displacements array */
-            memcpy(ptr, phf->impl.chd.displacements, 
-                   phf->impl.chd.num_buckets * sizeof(uint32_t));
+            std::memcpy(ptr, phf->impl.chd.displacements.data(), 
+                       phf->impl.chd.displacements.size() * sizeof(uint32_t));
             break;
         }
             
-        case PHF_TYPE_BDZ_2PARTITE:
-        case PHF_TYPE_BDZ_3PARTITE: {
-            /* Write BDZ metadata */
-            memcpy(ptr, &phf->impl.bdz.hash, sizeof(phf_hash_config_t));
+        case phf_type_t::PHF_TYPE_BDZ_2PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_3PARTITE: {
+            std::memcpy(ptr, &phf->impl.bdz.hash, sizeof(phf_hash_config_t));
             ptr += sizeof(phf_hash_config_t);
-            memcpy(ptr, &phf->impl.bdz.g_size, sizeof(uint32_t));
+            std::memcpy(ptr, &phf->impl.bdz.g_size, sizeof(uint32_t));
             ptr += sizeof(uint32_t);
-            memcpy(ptr, &phf->impl.bdz.num_vertices, sizeof(uint32_t));
+            std::memcpy(ptr, &phf->impl.bdz.num_vertices, sizeof(uint32_t));
             ptr += sizeof(uint32_t);
-            memcpy(ptr, &phf->impl.bdz.r, sizeof(uint8_t));
+            std::memcpy(ptr, &phf->impl.bdz.r, sizeof(uint8_t));
             ptr += sizeof(uint8_t);
-            memcpy(ptr, &phf->impl.bdz.is_minimal, sizeof(bool));
+            std::memcpy(ptr, &phf->impl.bdz.is_minimal, sizeof(bool));
             ptr += sizeof(bool);
             
-            /* Write g_array */
-            memcpy(ptr, phf->impl.bdz.g_array, 
-                   phf->impl.bdz.g_size * sizeof(uint8_t));
+            std::memcpy(ptr, phf->impl.bdz.g_array.data(), 
+                       phf->impl.bdz.g_array.size() * sizeof(uint8_t));
             break;
         }
     }
@@ -365,69 +331,65 @@ int phf_deserialize(const void *buffer, size_t buffer_len, phf_ctx_t *phf) {
         return -1;
     }
     
-    memset(phf, 0, sizeof(phf_ctx_t));
-    
-    const uint8_t *ptr = (const uint8_t *)buffer;
+    const uint8_t *ptr = static_cast<const uint8_t *>(buffer);
     
     /* Read type */
-    memcpy(&phf->type, ptr, sizeof(phf_type_t));
+    std::memcpy(&phf->type, ptr, sizeof(phf_type_t));
     ptr += sizeof(phf_type_t);
     
     /* Read num_keys */
-    memcpy(&phf->num_keys, ptr, sizeof(uint32_t));
+    std::memcpy(&phf->num_keys, ptr, sizeof(uint32_t));
     ptr += sizeof(uint32_t);
     
     /* Read type-specific data */
     switch (phf->type) {
-        case PHF_TYPE_CHD: {
+        case phf_type_t::PHF_TYPE_CHD: {
             size_t min_size = sizeof(phf_type_t) + sizeof(uint32_t) + 
                              sizeof(phf_hash_config_t) + 3 * sizeof(uint32_t) + sizeof(float);
             if (buffer_len < min_size) return -1;
             
-            /* Read metadata */
-            memcpy(&phf->impl.chd.hash, ptr, sizeof(phf_hash_config_t));
+            // Construct CHD member
+            new (&phf->impl.chd) phf_chd_t();
+            
+            std::memcpy(&phf->impl.chd.hash, ptr, sizeof(phf_hash_config_t));
             ptr += sizeof(phf_hash_config_t);
-            memcpy(&phf->impl.chd.num_buckets, ptr, sizeof(uint32_t));
+            std::memcpy(&phf->impl.chd.num_buckets, ptr, sizeof(uint32_t));
             ptr += sizeof(uint32_t);
-            memcpy(&phf->impl.chd.table_size, ptr, sizeof(uint32_t));
+            std::memcpy(&phf->impl.chd.table_size, ptr, sizeof(uint32_t));
             ptr += sizeof(uint32_t);
-            memcpy(&phf->impl.chd.epsilon, ptr, sizeof(float));
+            std::memcpy(&phf->impl.chd.epsilon, ptr, sizeof(float));
             ptr += sizeof(float);
             
-            /* Allocate and read displacements */
-            phf->impl.chd.displacements = malloc(phf->impl.chd.num_buckets * sizeof(uint32_t));
-            if (!phf->impl.chd.displacements) return -1;
-            
-            memcpy(phf->impl.chd.displacements, ptr, 
-                   phf->impl.chd.num_buckets * sizeof(uint32_t));
+            phf->impl.chd.displacements.resize(phf->impl.chd.num_buckets);
+            std::memcpy(phf->impl.chd.displacements.data(), ptr, 
+                       phf->impl.chd.num_buckets * sizeof(uint32_t));
             break;
         }
         
-        case PHF_TYPE_BDZ_2PARTITE:
-        case PHF_TYPE_BDZ_3PARTITE: {
+        case phf_type_t::PHF_TYPE_BDZ_2PARTITE:
+        case phf_type_t::PHF_TYPE_BDZ_3PARTITE: {
             size_t min_size = sizeof(phf_type_t) + sizeof(uint32_t) + 
                              sizeof(phf_hash_config_t) + 2 * sizeof(uint32_t) + 
                              sizeof(uint8_t) + sizeof(bool);
             if (buffer_len < min_size) return -1;
             
-            /* Read metadata */
-            memcpy(&phf->impl.bdz.hash, ptr, sizeof(phf_hash_config_t));
+            // Construct BDZ member
+            new (&phf->impl.bdz) phf_bdz_t();
+            
+            std::memcpy(&phf->impl.bdz.hash, ptr, sizeof(phf_hash_config_t));
             ptr += sizeof(phf_hash_config_t);
-            memcpy(&phf->impl.bdz.g_size, ptr, sizeof(uint32_t));
+            std::memcpy(&phf->impl.bdz.g_size, ptr, sizeof(uint32_t));
             ptr += sizeof(uint32_t);
-            memcpy(&phf->impl.bdz.num_vertices, ptr, sizeof(uint32_t));
+            std::memcpy(&phf->impl.bdz.num_vertices, ptr, sizeof(uint32_t));
             ptr += sizeof(uint32_t);
-            memcpy(&phf->impl.bdz.r, ptr, sizeof(uint8_t));
+            std::memcpy(&phf->impl.bdz.r, ptr, sizeof(uint8_t));
             ptr += sizeof(uint8_t);
-            memcpy(&phf->impl.bdz.is_minimal, ptr, sizeof(bool));
+            std::memcpy(&phf->impl.bdz.is_minimal, ptr, sizeof(bool));
             ptr += sizeof(bool);
             
-            /* Allocate and read g_array */
-            phf->impl.bdz.g_array = malloc(phf->impl.bdz.g_size * sizeof(uint8_t));
-            if (!phf->impl.bdz.g_array) return -1;
-            
-            memcpy(phf->impl.bdz.g_array, ptr, 
-                   phf->impl.bdz.g_size * sizeof(uint8_t));
+            phf->impl.bdz.g_array.resize(phf->impl.bdz.g_size);
+            std::memcpy(phf->impl.bdz.g_array.data(), ptr, 
+                       phf->impl.bdz.g_size * sizeof(uint8_t));
             break;
         }
         
