@@ -15,7 +15,7 @@
 #include <iomanip>
 
 extern "C" {
-    #include "../src/asymetric/rsa.h"
+    #include "../src/asymmetric/rsa.h"
 }
 
 // ============================================================================
