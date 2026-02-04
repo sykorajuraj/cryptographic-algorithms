@@ -109,14 +109,14 @@ set(RSA_HEADERS
     ${SRC_DIR}/asymmetric/rsa.h
 )
 
-# PHF (Perfect Hash Function) Sources
+# PHF (Perfect Hash Function) Sources - Now C++ (.cpp)
 set(PHF_SOURCES
-    ${SRC_DIR}/hash/phf_api.c
-    ${SRC_DIR}/hash/phf_bdz.c
-    ${SRC_DIR}/hash/phf_chd.c
-    ${SRC_DIR}/hash/phf_elias_fano.c
-    ${SRC_DIR}/hash/phf_hash.c
-    ${SRC_DIR}/hash/phf_rank_select.c
+    ${SRC_DIR}/hash/phf_api.cpp
+    ${SRC_DIR}/hash/phf_bdz.cpp
+    ${SRC_DIR}/hash/phf_chd.cpp
+    ${SRC_DIR}/hash/phf_elias_fano.cpp
+    ${SRC_DIR}/hash/phf_hash.cpp
+    ${SRC_DIR}/hash/phf_rank_select.cpp
 )
 
 set(PHF_HEADERS
@@ -150,7 +150,7 @@ target_include_directories(rsa PUBLIC
 )
 
 # ==============================================================================
-# PHF Library
+# PHF Library (Pure C++)
 # ==============================================================================
 
 add_library(phf STATIC
@@ -163,7 +163,9 @@ target_include_directories(phf PUBLIC
 )
 
 # Link math library for PHF (needed for sqrt, etc.)
-target_link_libraries(phf m)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(phf m)
+endif()
 
 # ==============================================================================
 # Utils Library
@@ -193,9 +195,9 @@ if(BUILD_EXAMPLES)
     )
     
     # PHF example (if exists)
-    if(EXISTS ${EXAMPLE_DIR}/example_phf.c)
+    if(EXISTS ${EXAMPLE_DIR}/example_phf.cpp)
         add_executable(example_phf
-            ${EXAMPLE_DIR}/example_phf.c
+            ${EXAMPLE_DIR}/example_phf.cpp
         )
         
         target_link_libraries(example_phf
@@ -246,7 +248,7 @@ if(BUILD_TESTS)
         
         add_test(NAME RSATests COMMAND test_rsa)
         
-        # Add PHF test executable
+        # Add PHF test executable (C++)
         add_executable(test_phf
             ${TEST_DIR}/test_phf.cpp
         )
@@ -263,8 +265,12 @@ if(BUILD_TESTS)
         message(STATUS "Tests will be built with Google Test")
     else()
         message(WARNING "Google Test not found. Tests will not be built.")
-        message(WARNING "Install with: sudo apt-get install libgtest-dev (Ubuntu/Debian)")
-        set(BUILD_TESTS OFF)
+        message(STATUS "To install Google Test on Ubuntu/Debian:")
+        message(STATUS "  sudo apt-get install libgtest-dev")
+        message(STATUS "  cd /usr/src/gtest")
+        message(STATUS "  sudo cmake .")
+        message(STATUS "  sudo make")
+        message(STATUS "  sudo cp lib/*.a /usr/lib")
     endif()
 endif()
 
@@ -278,18 +284,17 @@ if(BUILD_BENCHMARKS)
     )
     
     target_link_libraries(bench_aes
-        utils
         aes
+        utils
     )
     
     # PHF benchmark (if exists)
-    if(EXISTS ${BENCH_DIR}/bench_phf.c)
+    if(EXISTS ${BENCH_DIR}/bench_phf.cpp)
         add_executable(bench_phf
-            ${BENCH_DIR}/bench_phf.c
+            ${BENCH_DIR}/bench_phf.cpp
         )
         
         target_link_libraries(bench_phf
-            utils
             phf
         )
     endif()
@@ -301,15 +306,14 @@ endif()
 # Custom Targets
 # ==============================================================================
 
-# Run examples
-if(BUILD_EXAMPLES)
-    add_custom_target(run-examples
-        COMMAND example_aes
-        DEPENDS example_aes
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        COMMENT "Running AES examples..."
-    )
-endif()
+# Clean build
+add_custom_target(clean-all
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR} --target clean
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles
+    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_BINARY_DIR}/CMakeCache.txt
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Cleaning all build artifacts..."
+)
 
 # Run tests
 if(BUILD_TESTS AND GTest_FOUND)
@@ -473,10 +477,10 @@ endif()
 find_program(CLANG_FORMAT clang-format)
 if(CLANG_FORMAT)
     file(GLOB_RECURSE ALL_SOURCE_FILES
-        ${SRC_DIR}/*.c ${SRC_DIR}/*.h
+        ${SRC_DIR}/*.c ${SRC_DIR}/*.cpp ${SRC_DIR}/*.h
         ${TEST_DIR}/*.cpp ${TEST_DIR}/*.h
-        ${BENCH_DIR}/*.c ${BENCH_DIR}/*.h
-        ${EXAMPLE_DIR}/*.c ${EXAMPLE_DIR}/*.h
+        ${BENCH_DIR}/*.c ${BENCH_DIR}/*.cpp ${BENCH_DIR}/*.h
+        ${EXAMPLE_DIR}/*.c ${EXAMPLE_DIR}/*.cpp ${EXAMPLE_DIR}/*.h
     )
     
     add_custom_target(format
@@ -528,9 +532,9 @@ message(STATUS "  Tests:           ${BUILD_TESTS}")
 message(STATUS "  Benchmarks:      ${BUILD_BENCHMARKS}")
 message(STATUS "")
 message(STATUS "Libraries:")
-message(STATUS "  AES:             YES")
-message(STATUS "  RSA:             YES")
-message(STATUS "  PHF:             YES")
+message(STATUS "  AES:             YES (C)")
+message(STATUS "  RSA:             YES (C)")
+message(STATUS "  PHF:             YES (C++)")
 message(STATUS "")
 message(STATUS "Tools found:")
 if(GTest_FOUND)
@@ -566,7 +570,3 @@ endif()
 message(STATUS "")
 message(STATUS "Install prefix:    ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "")
-
-# ==============================================================================
-# End of CMakeLists.txt
-# ==============================================================================
