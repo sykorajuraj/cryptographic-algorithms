@@ -340,6 +340,20 @@ asm_rsa_pvt_key_new(size_t key_size);
 void
 asm_rsa_pvt_key_free(asm_rsa_pvt_key_t *pvt_key);
 
+// Forward declarations of static helpers
+static int bignum_cmp(const asm_rsa_bignum_t *a, const asm_rsa_bignum_t *b);
+static void bignum_copy(asm_rsa_bignum_t *dst, const asm_rsa_bignum_t *src);
+static void bignum_trim(asm_rsa_bignum_t *bn);
+static int bignum_add(asm_rsa_bignum_t *result, const asm_rsa_bignum_t *a, const asm_rsa_bignum_t *b);
+static int bignum_sub(asm_rsa_bignum_t *result, const asm_rsa_bignum_t *a, const asm_rsa_bignum_t *b);
+static int bignum_mul(asm_rsa_bignum_t *result, const asm_rsa_bignum_t *a, const asm_rsa_bignum_t *b);
+static int bignum_div(asm_rsa_bignum_t *quotient, asm_rsa_bignum_t *remainder, const asm_rsa_bignum_t *dividend, const asm_rsa_bignum_t *divisor);
+static int bignum_mod(asm_rsa_bignum_t *result, const asm_rsa_bignum_t *a, const asm_rsa_bignum_t *m);
+static int bignum_mul_mod(asm_rsa_bignum_t *result, const asm_rsa_bignum_t *a, const asm_rsa_bignum_t *b, const asm_rsa_bignum_t *m);
+static int bignum_mod_exp(asm_rsa_bignum_t *result, const asm_rsa_bignum_t *base, const asm_rsa_bignum_t *exp, const asm_rsa_bignum_t *mod);
+static int rsa_decrypt_crt(asm_rsa_bignum_t *m, const asm_rsa_bignum_t *c, const asm_rsa_pvt_key_t *key);
+
+
 #ifdef __cplusplus
 }
 #endif
