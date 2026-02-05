@@ -42,7 +42,7 @@ if(ENABLE_WARNINGS)
     if(MSVC)
         add_compile_options(/W4)
     else()
-        add_compile_options(-Wall -Wextra)
+        add_compile_options(-Wall)
     endif()
 endif()
 
@@ -368,14 +368,6 @@ if(BUILD_EXAMPLES AND BUILD_TESTS AND BUILD_BENCHMARKS AND GTest_FOUND)
         COMMENT "Running all examples, tests, and benchmarks..."
     )
 endif()
-
-# Plot results
-add_custom_target(plot
-    COMMAND ${CMAKE_COMMAND} -E echo "Generating benchmark visualizations..."
-    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/plot_results.py
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    COMMENT "Generating plots from benchmark results..."
-)
 
 # Clean results
 add_custom_target(clean-results

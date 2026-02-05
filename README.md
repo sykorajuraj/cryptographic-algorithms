@@ -1,54 +1,53 @@
-# cryptographic-algorithms
-Experimental study aims in understanding, comparing and implementing of cryptographic algorithms (symmetric, asymmetric encryption, and hash functions) for course of Software Development at University of Bologna
+# Cryptographic Algorithms
 
-```text
-cryptographic-algorithms/
-├── README.md
-├── Makefile
-├── LICENSE
-│
-├── docs/
-│   ├── study.pdf              # Project documentation
-│   └── slides.pdf             # Presentation slides
-│
-├── src/
-│   ├── symmetric/
-│   │   ├── aes.h             # AES-128 header
-│   │   └── aes.c             # AES-128 implementation
-│   │
-│   ├── asymmetric/
-│   │   ├── rsa.h             # RSA header (planned)
-│   │   └── rsa.c             # RSA implementation (planned)
-│   │
-│   └── hash/
-│       ├── sha256.h          # SHA-256 (planned)
-│       ├── sha256.c
-│       ├── chd.h             # CHD perfect hash (planned)
-│       ├── chd.c
-│       ├── bdz.h             # BDZ perfect hash (planned)
-│       └── bdz.c
-│
-├── tests/
-│   ├── test_aes.cpp            # AES unit tests
-│   ├── test_rsa.cpp            # RSA tests (planned)
-│   ├── test_sha256.cpp         # SHA-256 tests (planned)
-│   └── test_chd.cpp            # Perfect hash tests (planned)
-│
-├── benchmarks/
-│   ├── bench_aes.c           # AES performance benchmarks
-│   ├── bench_rsa.c           # RSA benchmarks (planned)
-│   └── bench_sbox_compare.c  # S-box comparison (planned)
-│
-├── examples/
-│   ├── example_aes.c         # AES usage examples
-│   ├── example_rsa.c         # RSA examples (planned)
-│   └── example_chd.c         # Perfect hash examples (planned)
-│
-├── scripts/
-│   ├── run_tests.sh          # Test runner script
-│   ├── run_benchmarks.sh     # Benchmark runner
-│   └── plot_results.py       # Results visualization
-│
-└── results/
-    ├── benchmarks.csv        # Raw benchmark data
-    └── *.png                 # Generated graphs
+Experimental study aims in understanding, comparing, and examining cryptographic algorithms (symmetric, asymmetric encryption, and hash functions) for the course of **Software Development M** at the University of Bologna. Includes experimental implementation of **AES-128/**, **RSA**, and **Perfect Hash Functions** in C/C++.
+
+## Project Overview
+
+This project implements three fundamental cryptographic primitives from scratch:
+- **AES-128**: Symmetric encryption with ECB, CBC, and CTR modes
+- **RSA**: Asymmetric encryption with 512-4096 bit keys and CRT optimization
+- **Perfect Hash Functions**: CHD and BDZ algorithms for collision-free hashing
+
+## Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/sykorajuraj/cryptographic-algorithms
+cd cryptographic-algorithms
+
+# Build everything
+mkdir build && cd build
+cmake ..
+make
+
+# Build everything, run benchmarks, and run all tests
+make run-all
+
+# Run tests with detailed performance output
+ctest --verbose
+
+# Run tests manually
+./test_aes
+./test_rsa
+./test_phf
+
+# Run AES benchmarks
+make run-benchmarks
+```
+
+## Project Structure
+
+```
+src/          # Implementation files (aes.c, rsa.c, hash functions)
+tests/        # Unit tests validating correctness and performance
+benchmarks/   # Performance measurements of AES
+examples/     # Usage example of AES
+docs/         # Full experimental study documentation (report)
+```
+
+## Documentation
+
+See `docs/JurajSykora_ExperimentalStudy_AES_RSA_PHF.pdf` for detailed implementation analysis, performance results, and comparative study.
+
+**License MIT - Juraj Sýkora**
